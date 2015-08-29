@@ -4429,9 +4429,11 @@ eval4(arg, rettv, evaluate)
 		    break;
 	case 'i':   if (p[1] == 's')
 		    {
+			int	c;
 			if (p[2] == 'n' && p[3] == 'o' && p[4] == 't')
 			    len = 5;
-			if (!vim_isIDc(p[len]))
+			c = p[len];
+			if (!isalnum(c) && c != '_')
 			{
 			    type = len == 2 ? TYPE_EQUAL : TYPE_NEQUAL;
 			    type_is = TRUE;
