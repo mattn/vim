@@ -119,9 +119,10 @@ You will not get an error if you try to change the type of a variable.
 
 1.2 Function references ~
 					*Funcref* *E695* *E718*
-A Funcref variable is obtained with the |function()| function.	It can be used
-in an expression in the place of a function name, before the parenthesis
-around the arguments, to invoke the function it refers to.  Example: >
+A Funcref variable is obtained with the |function()| function or created with
+the |lambda()| function.  It can be used in an expression in the place of a
+function name, before the parenthesis around the arguments, to invoke the
+function it refers to.  Example: >
 
 	:let Fn = function("MyFunc")
 	:echo Fn()
@@ -2003,6 +2004,7 @@ json_decode({string})		any	decode JSON
 json_encode({expr})		String	encode JSON
 keys({dict})			List	keys in {dict}
 len({expr})			Number	the length of {expr}
+lambda({expr})			Funcref	create a lambda function
 libcall({lib}, {func}, {arg})	String	call {func} in library {lib} with {arg}
 libcallnr({lib}, {func}, {arg})  Number  idem, but return a Number
 line({expr})			Number	line nr of cursor, last line or mark
@@ -3438,11 +3440,12 @@ filewritable({file})					*filewritable()*
 		directory, and we can write to it, the result is 2.
 
 
-filter({expr}, {string})					*filter()*
-		{expr} must be a |List| or a |Dictionary|.
-		For each item in {expr} evaluate {string} and when the result
+filter({expr1}, {expr2})				*filter()*
+		{expr1} must be a |List| or a |Dictionary|.
+		For each item in {expr1} evaluate {expr2} and when the result
 		is zero remove the item from the |List| or |Dictionary|.
-		Inside {string} |v:val| has the value of the current item.
+		{expr2} must be a |string| or |Funcref|. If it is a |string|,
+		inside {expr2} |v:val| has the value of the current item.
 		For a |Dictionary| |v:key| has the key of the current item.
 		Examples: >
 			:call filter(mylist, 'v:val !~ "OLD"')
@@ -3452,7 +3455,7 @@ filter({expr}, {string})					*filter()*
 			:call filter(var, 0)
 <		Removes all the items, thus clears the |List| or |Dictionary|.
 
-		Note that {string} is the result of expression and is then
+		Note that {expr2} is the result of expression and is then
 		used as an expression again.  Often it is good to use a
 		|literal-string| to avoid having to double backslashes.
 
@@ -3460,9 +3463,13 @@ filter({expr}, {string})					*filter()*
 		|Dictionary| to remain unmodified make a copy first: >
 			:let l = filter(copy(mylist), 'v:val =~ "KEEP"')
 
-<		Returns {expr}, the |List| or |Dictionary| that was filtered.
-		When an error is encountered while evaluating {string} no
-		further items in {expr} are processed.
+<		Returns {expr1}, the |List| or |Dictionary| that was filtered.
+		When an error is encountered while evaluating {expr2} no
+		further items in {expr1} are processed.
+
+		{expr2} is possible to be given as |Funcref|. The function
+		should return TRUE if the item should be kept. The value is
+		given as "a:1".
 
 
 finddir({name}[, {path}[, {count}]])				*finddir()*
@@ -4785,6 +4792,72 @@ len({expr})	The result is a Number, which is the length of the argument.
 		|Dictionary| is returned.
 		Otherwise an error is given.
 
+							*lambda()*
+lambda({expr})
+		Create a new lambda function which constructed with {expr}.
+		The result is a |Funcref|. So you can call it just like a
+		normal function.
+		Example: >
+		    :let F = lambda("return 1 + 2")
+		    :echo F()
+<		    3
+
+		Lambda function can take variadic arguments.
+		Example: >
+		    :let F = lambda("return a:1 + 2")
+		    :echo F(2)
+<		    4
+
+		|sort()|, |map()| and |filter()| can be used with |lambda()|.
+		Examples: >
+		    :echo map([1, 2, 3], lambda("return a:1 + 1"))
+<		    [2, 3, 4] >
+		    :echo sort([3,7,2,1,4], lambda("return a:1 - a:2"))
+<		    [1, 2, 3, 4, 7]
+
+		Channel, job and timer can also be used with |lambda()|.
+		Example: >
+		    :let timer = timer_start(500,
+				\ lambda("echo 'Handler called'"),
+				\ {'repeat': 3})
+<
+		Lambda function can reference the variables in the defined
+		scope.
+		Examples: >
+		    :let s:x = 2
+		    :echo filter([1, 2, 3], lambda("return a:1 >= s:x"))
+<		    [2, 3] >
+
+		    :function! Foo()
+		    :  let x = 1
+		    :  return lambda("return x")
+		    :endfunction
+		    :echo Foo()()
+<		    1
+
+		And if let new variable, it will be stored in the lambda's
+		scope.
+		Example: >
+		    :function! Foo()
+		    :  call lambda("let x = 1")()
+		    :  echo x | " Should be error
+		    :endfunction
+<
+		For example, you can create a counter generator. >
+		    :function! s:counter(x)
+		    :  let x = a:x
+		    :  return lambda("
+		    :  \ let x += 1 \n
+		    :  \ return x
+		    :  \")
+		    :endfunction
+
+		    :let F = s:counter(0)
+		    :echo F() | " 1
+		    :echo F() | " 2
+		    :echo F() | " 3
+		    :echo F() | " 4
+<
 						*libcall()* *E364* *E368*
 libcall({libname}, {funcname}, {argument})
 		Call function {funcname} in the run-time library {libname}
@@ -4931,18 +5004,19 @@ luaeval({expr}[, {expr}])					*luaeval()*
 		See |lua-luaeval| for more details.
 		{only available when compiled with the |+lua| feature}
 
-map({expr}, {string})					*map()*
-		{expr} must be a |List| or a |Dictionary|.
-		Replace each item in {expr} with the result of evaluating
-		{string}.
-		Inside {string} |v:val| has the value of the current item.
+map({expr1}, {expr2})					*map()*
+		{expr1} must be a |List| or a |Dictionary|.
+		Replace each item in {expr1} with the result of evaluating
+		{expr2}.
+		{expr2} must be a |string| or |Funcref|. If it is a |string|,
+		inside {expr2} |v:val| has the value of the current item.
 		For a |Dictionary| |v:key| has the key of the current item
 		and for a |List| |v:key| has the index of the current item.
 		Example: >
 			:call map(mylist, '"> " . v:val . " <"')
 <		This puts "> " before and " <" after each item in "mylist".
 
-		Note that {string} is the result of an expression and is then
+		Note that {expr2} is the result of an expression and is then
 		used as an expression again.  Often it is good to use a
 		|literal-string| to avoid having to double backslashes.  You
 		still have to double ' quotes
@@ -4951,10 +5025,12 @@ map({expr}, {string})					*map()*
 		|Dictionary| to remain unmodified make a copy first: >
 			:let tlist = map(copy(mylist), ' v:val . "\t"')
 
-<		Returns {expr}, the |List| or |Dictionary| that was filtered.
-		When an error is encountered while evaluating {string} no
-		further items in {expr} are processed.
+<		Returns {expr1}, the |List| or |Dictionary| that was filtered.
+		When an error is encountered while evaluating {expr2} no
+		further items in {expr1} are processed.
 
+		{expr2} is possible to be given as |Funcref|. The function
+		should return value proceeded from "a:1".
 
 maparg({name}[, {mode} [, {abbr} [, {dict}]]])			*maparg()*
 		When {dict} is omitted or zero: Return the rhs of mapping

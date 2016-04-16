@@ -1122,8 +1122,11 @@ remove_timer(timer_T *timer)
     static void
 free_timer(timer_T *timer)
 {
+    if (timer->tr_partial == NULL)
+	func_unref(timer->tr_callback);
+    else
+	partial_unref(timer->tr_partial);
     vim_free(timer->tr_callback);
-    partial_unref(timer->tr_partial);
     vim_free(timer);
 }
 

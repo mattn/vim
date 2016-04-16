@@ -163,6 +163,7 @@ static int echo_attr = 0;   /* attributes used for ":echo" */
  * Structure to hold info for a user function.
  */
 typedef struct ufunc ufunc_T;
+typedef struct funccall_S funccall_T;
 
 struct ufunc
 {
@@ -191,6 +192,7 @@ struct ufunc
     scid_T	uf_script_ID;	/* ID of script where function was defined,
 				   used for s: variables */
     int		uf_refcount;	/* for numbered function: reference count */
+    funccall_T	*uf_scoped;	/* l: local function variables */
     char_u	uf_name[1];	/* name of function (actually longer); can
 				   start with <SNR>123_ (<SNR> is K_SPECIAL
 				   KS_EXTRA KE_SNR) */
@@ -229,7 +231,6 @@ static ufunc_T dumuf;
 #define FIXVAR_CNT	12	/* number of fixed variables */
 
 /* structure to hold info for a function that is currently being executed. */
-typedef struct funccall_S funccall_T;
 
 struct funccall_S
 {
@@ -255,6 +256,10 @@ struct funccall_S
     proftime_T	prof_child;	/* time spent in a child */
 #endif
     funccall_T	*caller;	/* calling function or NULL */
+
+    /* for lambda */
+    int		ref_by_lambda;
+    int		lambda_copyID;	/* for garbage collection */
 };
 
 /*
@@ -654,6 +659,7 @@ static void f_js_decode(typval_T *argvars, typval_T *rettv);
 static void f_js_encode(typval_T *argvars, typval_T *rettv);
 static void f_json_decode(typval_T *argvars, typval_T *rettv);
 static void f_json_encode(typval_T *argvars, typval_T *rettv);
+static void f_lambda(typval_T *argvars, typval_T *rettv);
 static void f_keys(typval_T *argvars, typval_T *rettv);
 static void f_last_buffer_nr(typval_T *argvars, typval_T *rettv);
 static void f_len(typval_T *argvars, typval_T *rettv);
@@ -3764,6 +3770,7 @@ do_unlet(char_u *name, int forceit)
     char_u	*varname;
     dict_T	*d;
     dictitem_T	*di;
+    funccall_T	*old_current_funccal;
 
     ht = find_var_ht(name, &varname);
     if (ht != NULL && *varname != NUL)
@@ -3786,6 +3793,26 @@ do_unlet(char_u *name, int forceit)
 	    return FAIL;
 	}
 	hi = hash_find(ht, varname);
+
+	if (HASHITEM_EMPTY(hi) && current_funccal != NULL &&
+		current_funccal->func->uf_scoped != NULL)
+	{
+	    /* Search in parent scope for lambda */
+	    old_current_funccal = current_funccal;
+	    current_funccal = current_funccal->func->uf_scoped;
+	    while (current_funccal)
+	    {
+		ht = find_var_ht(name, &varname);
+		if (ht != NULL && *varname != NUL)
+		{
+		    hi = hash_find(ht, varname);
+		    if (!HASHITEM_EMPTY(hi))
+			break;
+		}
+		current_funccal = current_funccal->func->uf_scoped;
+	    }
+	    current_funccal = old_current_funccal;
+	}
 	if (!HASHITEM_EMPTY(hi))
 	{
 	    di = HI2DI(hi);
@@ -6957,6 +6984,7 @@ garbage_collect(int testing)
      * the item is referenced elsewhere the funccal must not be freed. */
     for (fc = previous_funccal; fc != NULL; fc = fc->caller)
     {
+	fc->lambda_copyID = copyID + 1;
 	abort = abort || set_ref_in_ht(&fc->l_vars.dv_hashtab, copyID + 1,
 									NULL);
 	abort = abort || set_ref_in_ht(&fc->l_avars.dv_hashtab, copyID + 1,
@@ -7331,6 +7359,25 @@ set_ref_in_item(
 	    for (i = 0; i < pt->pt_argc; ++i)
 		abort = abort || set_ref_in_item(&pt->pt_argv[i], copyID,
 							ht_stack, list_stack);
+	}
+    }
+    else if (tv->v_type == VAR_FUNC)
+    {
+	ufunc_T	*fp;
+	funccall_T	*fc;
+
+	fp = find_func(tv->vval.v_string);
+	if (fp != NULL)
+	{
+	    for (fc = fp->uf_scoped; fc != NULL; fc = fc->func->uf_scoped)
+	    {
+		if (fc->lambda_copyID != copyID)
+		{
+		    fc->lambda_copyID = copyID;
+		    set_ref_in_ht(&fc->l_vars.dv_hashtab, copyID, NULL);
+		    set_ref_in_ht(&fc->l_avars.dv_hashtab, copyID, NULL);
+		}
+	    }
 	}
     }
 #ifdef FEAT_JOB_CHANNEL
@@ -8517,6 +8564,7 @@ static struct fst
     {"json_decode",	1, 1, f_json_decode},
     {"json_encode",	1, 1, f_json_encode},
     {"keys",		1, 1, f_keys},
+    {"lambda",		1, 1, f_lambda},
     {"last_buffer_nr",	0, 0, f_last_buffer_nr},/* obsolete */
     {"len",		1, 1, f_len},
     {"libcall",		3, 3, f_libcall},
@@ -9090,7 +9138,7 @@ call_func(
 	rettv->vval.v_number = 0;
 	error = ERROR_UNKNOWN;
 
-	if (!builtin_function(rfname, -1))
+	if (!builtin_function(rfname, -1) || !STRNICMP(rfname, "<LAMBDA>", 8))
 	{
 	    /*
 	     * User defined function.
@@ -11705,7 +11753,7 @@ findfilendir(
 }
 
 static void filter_map(typval_T *argvars, typval_T *rettv, int map);
-static int filter_map_one(typval_T *tv, char_u *expr, int map, int *remp);
+static int filter_map_one(typval_T *tv, typval_T *expr, int map, int *remp);
 
 /*
  * Implementation of map() and filter().
@@ -11713,8 +11761,7 @@ static int filter_map_one(typval_T *tv, char_u *expr, int map, int *remp);
     static void
 filter_map(typval_T *argvars, typval_T *rettv, int map)
 {
-    char_u	buf[NUMBUFLEN];
-    char_u	*expr;
+    typval_T	*expr;
     listitem_T	*li, *nli;
     list_T	*l = NULL;
     dictitem_T	*di;
@@ -11749,14 +11796,13 @@ filter_map(typval_T *argvars, typval_T *rettv, int map)
 	return;
     }
 
-    expr = get_tv_string_buf_chk(&argvars[1], buf);
+    expr = &argvars[1];
     /* On type errors, the preceding call has already displayed an error
      * message.  Avoid a misleading error message for an empty string that
      * was not passed as argument. */
-    if (expr != NULL)
+    if (expr->v_type != VAR_UNKNOWN)
     {
 	prepare_vimvar(VV_VAL, &save_val);
-	expr = skipwhite(expr);
 
 	/* We reset "did_emsg" to be able to detect whether an error
 	 * occurred during evaluation of the expression. */
@@ -11828,21 +11874,31 @@ filter_map(typval_T *argvars, typval_T *rettv, int map)
 }
 
     static int
-filter_map_one(typval_T *tv, char_u *expr, int map, int *remp)
+filter_map_one(typval_T *tv, typval_T *expr, int map, int *remp)
 {
     typval_T	rettv;
     char_u	*s;
     int		retval = FAIL;
+    int		dummy;
 
     copy_tv(tv, &vimvars[VV_VAL].vv_tv);
-    s = expr;
-    if (eval1(&s, &rettv, TRUE) == FAIL)
-	goto theend;
-    if (*s != NUL)  /* check for trailing chars after expr */
+    s = expr->vval.v_string;
+    if (expr->v_type == VAR_FUNC)
     {
-	EMSG2(_(e_invexpr2), s);
-	clear_tv(&rettv);
-	goto theend;
+	if (call_func(s, (int)STRLEN(s),
+		    &rettv, 1, tv, 0L, 0L, &dummy, TRUE, NULL, NULL) == FALSE)
+	    goto theend;
+    }
+    else
+    {
+	s = skipwhite(s);
+	if (eval1(&s, &rettv, TRUE) == FAIL)
+	    goto theend;
+	if (*s != NUL)  /* check for trailing chars after expr */
+	{
+	    EMSG2(_(e_invexpr2), s);
+	    goto theend;
+	}
     }
     if (map)
     {
@@ -15188,6 +15244,82 @@ f_json_encode(typval_T *argvars, typval_T *rettv)
 f_keys(typval_T *argvars, typval_T *rettv)
 {
     dict_list(argvars, rettv, 0);
+}
+
+/*
+ * "lambda()" function.
+ */
+    static void
+f_lambda(argvars, rettv)
+    typval_T	*argvars UNUSED;
+    typval_T	*rettv;
+{
+    char_u	*s, *e;
+    garray_T	newargs;
+    garray_T	newlines;
+    ufunc_T	*fp;
+    char_u	name[20];
+    static int	lambda_no = 0;
+
+    if (check_secure())
+	return;
+
+    s = get_tv_string_chk(&argvars[0]);
+    if (s == NULL)
+        goto erret;
+
+    fp = (ufunc_T *)alloc((unsigned)(sizeof(ufunc_T) + 20));
+    if (fp == NULL)
+	goto erret;
+
+    sprintf((char*)name, "<LAMBDA>%d", ++lambda_no);
+    rettv->vval.v_string = vim_strsave(name);
+
+    ga_init2(&newargs, (int)sizeof(char_u *), 1);
+    ga_init2(&newlines, (int)sizeof(char_u *), 1);
+
+    while (*s)
+    {
+	s = skipwhite(s);
+	e = s;
+	while (*e && *e != '\n')
+	    e++;
+        if (ga_grow(&newlines, 1) == FAIL)
+	    goto erret;
+        ((char_u **)(newlines.ga_data))[newlines.ga_len++] = vim_strnsave(s, e - s);
+	s = *e == 0 ? e : e + 1;
+    }
+
+    fp->uf_refcount = 1;
+    STRCPY(fp->uf_name, name);
+    hash_add(&func_hashtab, UF2HIKEY(fp));
+    fp->uf_args = newargs;
+    fp->uf_lines = newlines;
+#ifdef FEAT_PROFILE
+    fp->uf_tml_count = NULL;
+    fp->uf_tml_total = NULL;
+    fp->uf_tml_self = NULL;
+    fp->uf_profiling = FALSE;
+    if (prof_def_func())
+	func_do_profile(fp);
+#endif
+    fp->uf_varargs = TRUE;
+    fp->uf_flags = 0;
+    fp->uf_calls = 0;
+    fp->uf_script_ID = current_SID;
+    if (current_funccal)
+    {
+	fp->uf_scoped = current_funccal;
+	current_funccal->ref_by_lambda = TRUE;
+    }
+    else
+	fp->uf_scoped = NULL;
+    rettv->v_type = VAR_FUNC;
+    return;
+
+erret:
+    ga_clear_strings(&newargs);
+    ga_clear_strings(&newlines);
 }
 
 /*
@@ -20642,8 +20774,15 @@ get_callback(typval_T *arg, partial_T **pp)
 	return (*pp)->pt_name;
     }
     *pp = NULL;
-    if (arg->v_type == VAR_FUNC || arg->v_type == VAR_STRING)
+    if (arg->v_type == VAR_FUNC)
+    {
+	func_ref(arg->vval.v_string);
 	return arg->vval.v_string;
+    }
+    if (arg->v_type == VAR_STRING)
+    {
+	return arg->vval.v_string;
+    }
     if (arg->v_type == VAR_NUMBER && arg->vval.v_number == 0)
 	return (char_u *)"";
     EMSG(_("E921: Invalid callback argument"));
@@ -22712,6 +22851,37 @@ get_tv_string_buf_chk(typval_T *varp, char_u *buf)
     return NULL;
 }
 
+    static dictitem_T*
+find_var_in_scoped_ht(name, varname, no_autoload)
+    char_u	*name;
+    char_u	**varname;
+    int		no_autoload;
+{
+    dictitem_T	*v = NULL;
+    funccall_T	*old_current_funccal = current_funccal;
+    hashtab_T	*ht;
+
+    /* Search in parent scope which is possible to reference from lambda */
+    current_funccal = current_funccal->func->uf_scoped;
+    while (current_funccal)
+    {
+	ht = find_var_ht(name, varname ? &(*varname) : NULL);
+	if (ht != NULL)
+	{
+	    v = find_var_in_ht(ht, *name,
+		    varname ? *varname : NULL, no_autoload);
+	    if (v != NULL)
+		break;
+	}
+	if (current_funccal == current_funccal->func->uf_scoped)
+	    break;
+	current_funccal = current_funccal->func->uf_scoped;
+    }
+    current_funccal = old_current_funccal;
+
+    return v;
+}
+
 /*
  * Find variable "name" in the list of variables.
  * Return a pointer to it if found, NULL if not found.
@@ -22724,13 +22894,23 @@ find_var(char_u *name, hashtab_T **htp, int no_autoload)
 {
     char_u	*varname;
     hashtab_T	*ht;
+    dictitem_T	*ret = NULL;
 
     ht = find_var_ht(name, &varname);
     if (htp != NULL)
 	*htp = ht;
     if (ht == NULL)
 	return NULL;
-    return find_var_in_ht(ht, *name, varname, no_autoload || htp != NULL);
+    ret = find_var_in_ht(ht, *name, varname, no_autoload || htp != NULL);
+    if (ret != NULL)
+	return ret;
+
+    /* Search in parent scope for lambda */
+    if (current_funccal != NULL && current_funccal->func->uf_scoped != NULL)
+	return find_var_in_scoped_ht(name, varname ? &varname : NULL,
+		no_autoload || htp != NULL);
+
+    return NULL;
 }
 
 /*
@@ -23092,6 +23272,24 @@ set_var(
 	return;
     }
     v = find_var_in_ht(ht, 0, varname, TRUE);
+
+    /* Search in parent scope which is possible to reference from lambda */
+    if (v == NULL && current_funccal != NULL &&
+	    current_funccal->func->uf_scoped != NULL)
+    {
+	v = find_var_in_scoped_ht(name, varname ? &varname : NULL, TRUE);
+
+	/* When the variable is not found, let scope should be parent of the
+	 * lambda.
+	 */
+	if (v == NULL)
+	{
+	    hashtab_T	*ht_tmp;
+	    ht_tmp = find_var_ht(name, &varname);
+	    if (ht_tmp != NULL)
+		ht = ht_tmp;
+	}
+    }
 
     if ((tv->v_type == VAR_FUNC || tv->v_type == VAR_PARTIAL)
 				      && var_check_func_name(name, v == NULL))
@@ -24345,6 +24543,7 @@ ex_function(exarg_T *eap)
     fp->uf_flags = flags;
     fp->uf_calls = 0;
     fp->uf_script_ID = current_SID;
+    fp->uf_scoped = NULL;
     goto ret_free;
 
 erret:
@@ -25163,12 +25362,26 @@ func_unref(char_u *name)
 {
     ufunc_T *fp;
 
-    if (name != NULL && isdigit(*name))
+    if (name == NULL)
+	return;
+    else if (isdigit(*name))
     {
 	fp = find_func(name);
 	if (fp == NULL)
 	    EMSG2(_(e_intern2), "func_unref()");
 	else if (--fp->uf_refcount <= 0)
+	{
+	    /* Only delete it when it's not being used.  Otherwise it's done
+	     * when "uf_calls" becomes zero. */
+	    if (fp->uf_calls == 0)
+		func_free(fp);
+	}
+    }
+    else if (!STRNICMP(name, "<LAMBDA>", 8))
+    {
+	/* fail silently, when lambda function isn't found. */
+	fp = find_func(name);
+	if (fp != NULL && --fp->uf_refcount <= 0)
 	{
 	    /* Only delete it when it's not being used.  Otherwise it's done
 	     * when "uf_calls" becomes zero. */
@@ -25186,12 +25399,21 @@ func_ref(char_u *name)
 {
     ufunc_T *fp;
 
-    if (name != NULL && isdigit(*name))
+    if (name == NULL)
+	return;
+    else if (isdigit(*name))
     {
 	fp = find_func(name);
 	if (fp == NULL)
 	    EMSG2(_(e_intern2), "func_ref()");
 	else
+	    ++fp->uf_refcount;
+    }
+    else if (!STRNICMP(name, "<LAMBDA>", 8))
+    {
+	/* fail silently, when lambda function isn't found. */
+	fp = find_func(name);
+	if (fp != NULL)
 	    ++fp->uf_refcount;
     }
 }
@@ -25251,6 +25473,9 @@ call_user_func(
     /* Check if this function has a breakpoint. */
     fc->breakpoint = dbg_find_breakpoint(FALSE, fp->uf_name, (linenr_T)0);
     fc->dbg_tick = debug_tick;
+    /* Set up fields for lambda. */
+    fc->ref_by_lambda = FALSE;
+    fc->lambda_copyID = current_copyID;
 
     /*
      * Note about using fc->fixvar[]: This is an array of FIXVAR_CNT variables
@@ -25534,7 +25759,8 @@ call_user_func(
      * free the funccall_T and what's in it. */
     if (fc->l_varlist.lv_refcount == DO_NOT_FREE_CNT
 	    && fc->l_vars.dv_refcount == DO_NOT_FREE_CNT
-	    && fc->l_avars.dv_refcount == DO_NOT_FREE_CNT)
+	    && fc->l_avars.dv_refcount == DO_NOT_FREE_CNT
+	    && !fc->ref_by_lambda)
     {
 	free_funccal(fc, FALSE);
     }
@@ -25577,7 +25803,8 @@ can_free_funccal(funccall_T *fc, int copyID)
 {
     return (fc->l_varlist.lv_copyID != copyID
 	    && fc->l_vars.dv_copyID != copyID
-	    && fc->l_avars.dv_copyID != copyID);
+	    && fc->l_avars.dv_copyID != copyID
+	    && (!fc->ref_by_lambda && fc->lambda_copyID != copyID));
 }
 
 /*
