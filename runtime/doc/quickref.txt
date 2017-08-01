@@ -974,6 +974,7 @@ Short explanation of each option:		*option-list*
 'winminheight'	  'wmh'     minimum number of lines for any window
 'winminwidth'	  'wmw'     minimal number of columns for any window
 'winwidth'	  'wiw'     minimal number of columns for current window
+'winptydll'		    name of the winpty dynamic library
 'wrap'			    long lines wrap and continue on the next line
 'wrapmargin'	  'wm'	    chars from the right where wrapping starts
 'wrapscan'	  'ws'	    searches wrap around the end of the file

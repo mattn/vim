@@ -206,6 +206,7 @@ Options: ~
 'tagcase'		how to handle case when searching in tags files
 'tcldll'		name of the Tcl dynamic library
 'termguicolors'		use GUI colors for the terminal
+'winptydll'		name of the winpty dynamic library
 
 
 Ex commands: ~

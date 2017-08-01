@@ -766,6 +766,7 @@ OBJ += $(OUTDIR)/terminal.o \
 	$(OUTDIR)/term_state.o \
 	$(OUTDIR)/term_unicode.o \
 	$(OUTDIR)/term_vterm.o
+LIB += -lpsapi
 endif
 
 

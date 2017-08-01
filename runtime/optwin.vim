@@ -1355,6 +1355,10 @@ if exists("&tcldll")
   call append("$", "tcldll\tname of the Tcl dynamic library")
   call <SID>OptionG("tcldll", &tcldll)
 endif
+if exists("&winptydll")
+  call append("$", "winptydll\tname of the winpty dynamic library")
+  call <SID>OptionG("winptydll", &winptydll)
+endif
 
 set cpo&vim
 

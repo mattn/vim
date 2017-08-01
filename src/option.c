@@ -3105,6 +3105,15 @@ static struct vimoption options[] =
 			    (char_u *)NULL, PV_NONE,
 #endif
 			    {(char_u *)20L, (char_u *)0L} SCRIPTID_INIT},
+    {"winptydll",   NULL,   P_STRING|P_EXPAND|P_VI_DEF|P_SECURE,
+#if defined(FEAT_TERMINAL)
+			    (char_u *)&p_winptydll, PV_NONE,
+			    {(char_u *)"winpty.dll", (char_u *)0L}
+#else
+			    (char_u *)NULL, PV_NONE,
+			    {(char_u *)NULL, (char_u *)0L}
+#endif
+			    SCRIPTID_INIT},
     {"wrap",	    NULL,   P_BOOL|P_VI_DEF|P_RWIN,
 			    (char_u *)VAR_WIN, PV_WRAP,
 			    {(char_u *)TRUE, (char_u *)0L} SCRIPTID_INIT},

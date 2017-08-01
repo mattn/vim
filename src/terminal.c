@@ -2092,8 +2092,6 @@ void (*winpty_error_free)(void*);
 LPCWSTR (*winpty_error_msg)(void*);
 BOOL (*winpty_set_size)(void*, int, int, void*);
 
-#define WINPTY_DLL "winpty.dll"
-
 static HINSTANCE hWinPtyDLL = NULL;
 
     int
@@ -2127,10 +2125,10 @@ dyn_winpty_init(void)
     if (hWinPtyDLL)
 	return 1;
     /* Load winpty.dll */
-    hWinPtyDLL = vimLoadLib(WINPTY_DLL);
+    hWinPtyDLL = vimLoadLib((char*) p_winptydll);
     if (!hWinPtyDLL)
     {
-	EMSG2(_(e_loadlib), WINPTY_DLL);
+	EMSG2(_(e_loadlib), p_winptydll);
 	return 0;
     }
     for (i = 0; winpty_entry[i].name != NULL
