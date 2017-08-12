@@ -952,6 +952,9 @@ term_vgetc()
     ++no_mapping;
     ++allow_keys;
     got_int = FALSE;
+#ifdef WIN3264
+    got_break = FALSE;
+#endif
     c = vgetc();
     got_int = FALSE;
     --no_mapping;
@@ -1137,8 +1140,8 @@ terminal_loop(void)
 	may_send_sigint(c, curbuf->b_term->tl_job->jv_pid, 0);
 #endif
 #ifdef WIN3264
-	if (c == Ctrl_C)
-	    /* We don't know if the job can handle CTRL-C itself or not, this
+	if (got_break)
+	    /* We don't know if the job can handle CTRL-BREAK itself or not, this
 	     * may kill the shell instead of killing the command running in the
 	     * shell. */
 	    mch_stop_job(curbuf->b_term->tl_job, (char_u *)"quit");

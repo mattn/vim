@@ -1046,6 +1046,12 @@ EXTERN int	read_cmd_fd INIT(= 0);	    /* fd to read commands from */
 /* volatile because it is used in signal handler catch_sigint(). */
 EXTERN volatile int got_int INIT(= FALSE);    /* set to TRUE when interrupt
 						signal occurred */
+
+#ifdef WIN3264
+/* volatile because it is used in signal handler catch_sigint(). */
+EXTERN volatile int got_break INIT(= FALSE);  /* set to TRUE when Ctrl-BSL */
+#endif
+
 #ifdef USE_TERM_CONSOLE
 EXTERN int	term_console INIT(= FALSE); /* set to TRUE when console used */
 #endif
