@@ -358,6 +358,9 @@ term_start(typval_T *argvar, jobopt_T *opt, int forceit)
 	else
 	    cmd = get_tv_string_chk(&argvar->vval.v_list->lv_first->li_tv);
 
+	if (cmd == NULL || *cmd == NUL)
+	    cmd = p_sh;
+
 	len = STRLEN(cmd) + 10;
 	p = alloc((int)len);
 
@@ -437,11 +440,14 @@ ex_terminal(exarg_T *eap)
 {
     typval_T	argvar;
     jobopt_T	opt;
-    char_u	*cmd;
+    char_u	*cmd, *tmp = NULL;
 
     init_job_options(&opt);
 
     cmd = eap->arg;
+    if (cmd == NULL || *cmd == NUL)
+	tmp = cmd = vim_strsave(p_sh);
+
     while (*cmd && *cmd == '+' && *(cmd + 1) == '+')
     {
 	char_u  *p;
@@ -461,6 +467,7 @@ ex_terminal(exarg_T *eap)
 	    if (*p)
 		*p = NUL;
 	    EMSG2(_("E181: Invalid attribute: %s"), cmd);
+	    vim_free(tmp);
 	    return;
 	}
 	cmd = skipwhite(p);
@@ -480,8 +487,9 @@ ex_terminal(exarg_T *eap)
     }
 
     argvar.v_type = VAR_STRING;
-    argvar.vval.v_string = eap->arg;
+    argvar.vval.v_string = cmd;
     term_start(&argvar, &opt, eap->forceit);
+    vim_free(tmp);
 }
 
 /*
