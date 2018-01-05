@@ -2081,6 +2081,8 @@ cmdline_changed:
 	    if (vpeekc() == NUL)
 		redrawcmd();
 #endif
+
+	trigger_cmd_autocmd(cmdline_type, EVENT_CMDLINECHANGED);
     }
 
 returncmd:
