@@ -2082,7 +2082,10 @@ cmdline_changed:
 		redrawcmd();
 #endif
 
+#ifdef FEAT_AUTOCMD
+	/* Trigger CmdlineChanged autocommands. */
 	trigger_cmd_autocmd(cmdline_type, EVENT_CMDLINECHANGED);
+#endif
     }
 
 returncmd:
