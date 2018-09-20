@@ -51,6 +51,10 @@
 
 #include "libvterm/include/vterm.h"
 
+#ifdef UNIX
+# include <sys/ioctl.h>
+#endif
+
 /* This is VTermScreenCell without the characters, thus much smaller. */
 typedef struct {
   VTermScreenCellAttrs	attrs;
@@ -3633,13 +3637,105 @@ parse_osc(const char *command, size_t cmdlen, void *user)
     return 1;
 }
 
+/*
+ * Called by libvterm when it cannot recognize an DCS sequence.
+ */
+    static int
+parse_dcs(const char *command, size_t cmdlen, void *user)
+{
+    term_T	*term = (term_T *)user;
+    const char* ptr;
+    size_t offset = 0;
+    int	n, dx = 0, dw = 0, dh = 0, cw, ch, sw, sh, x, y;
+    char buf[20];
+    VTermPos	cursor_pos;
+#ifdef TIOCGWINSZ
+    struct winsize	ws;
+
+    if (ioctl(STDOUT_FILENO, TIOCGWINSZ, &ws) != 0)
+	return 0;
+    if (ws.ws_col == 0 || ws.ws_row == 0 || ws.ws_ypixel == 0)
+	return 0;
+    cw = ws.ws_xpixel / ws.ws_col;
+    ch = ws.ws_ypixel / ws.ws_row;
+#else
+    cw = 8;
+    ch = 16;
+#endif
+
+    ptr = strchr(command, '#');
+    if (!ptr)
+	return 0;
+    ptr++;
+
+    while (*ptr)
+    {
+	switch (*ptr)
+	{
+	    case '\r':
+	    case '\n':
+	    case '\b':
+		continue;
+	    case '$':
+		dx = 0;
+		break;
+	    case '?':
+		if (++dx > dw)
+		    dw = dx;
+		break;
+	    case '-':
+		dh += 6;
+		break;
+	    case '#':
+		while (*ptr && isdigit(*ptr))
+		    ptr++;
+		if (*ptr == 0)
+		    ptr--;
+		else if (*ptr == ';')
+		{
+		    for (n = 0; n < 4; n++)
+		    {
+			if (*ptr != ';')
+			    return 0;
+			ptr++;
+			while (*ptr && isdigit(*ptr))
+			    ptr++;
+		    }
+		}
+		else
+		{
+		    if (++dx > dw)
+			dw = dx;
+		}
+		break;
+	}
+	ptr++;
+    }
+
+    sw = dw + 2;
+    sh = dh / ch + 2;
+
+    if (write(STDOUT_FILENO, "\033P", 2) < 0) return 0;
+    if (write(STDOUT_FILENO, command, cmdlen) < 0) return 0;
+    if (write(STDOUT_FILENO, "\033\\", 2) < 0) return 0;
+
+    vterm_state_get_cursorpos(vterm_obtain_state(term->tl_vterm), &cursor_pos);
+    for (y = 0; y < sh; y++)
+	vterm_input_write(term->tl_vterm, "\n", 1);
+    sprintf(buf, "\033[%d;%dH", cursor_pos.row+sh, cursor_pos.col);
+    vterm_input_write(term->tl_vterm, buf, STRLEN(buf));
+    vterm_screen_flush_damage(vterm_obtain_screen(term->tl_vterm));
+
+    return 1;
+}
+
 static VTermParserCallbacks parser_fallbacks = {
   NULL,		/* text */
   NULL,		/* control */
   NULL,		/* escape */
   NULL,		/* csi */
   parse_osc,	/* osc */
-  NULL,		/* dcs */
+  parse_dcs,	/* dcs */
   NULL		/* resize */
 };
 

@@ -64,8 +64,12 @@ static void do_escape(VTerm *vt, char command)
 static void append_strbuffer(VTerm *vt, const char *str, size_t len)
 {
   if(len > vt->parser.strbuffer_len - vt->parser.strbuffer_cur) {
-    len = vt->parser.strbuffer_len - vt->parser.strbuffer_cur;
-    DEBUG_LOG1("Truncating strbuffer preserve to %zd bytes\n", len);
+    char *newbuf;
+    vt->parser.strbuffer_len = vt->parser.strbuffer_cur + len + 40960;
+    newbuf = vterm_allocator_malloc(vt, vt->parser.strbuffer_len);
+    memcpy(newbuf, vt->parser.strbuffer, vt->parser.strbuffer_cur);
+    vterm_allocator_free(vt, vt->parser.strbuffer);
+    vt->parser.strbuffer = newbuf;
   }
 
   if(len > 0) {
