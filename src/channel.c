@@ -71,9 +71,19 @@ fd_read(sock_T fd, char *buf, size_t len)
 {
     HANDLE h = (HANDLE)fd;
     DWORD nread;
+    OVERLAPPED ov;
 
-    if (!ReadFile(h, buf, (DWORD)len, &nread, NULL))
-	return -1;
+    memset(&ov, 0, sizeof (OVERLAPPED));
+    ov.hEvent = CreateEvent(0, FALSE, FALSE, 0);
+
+    if (!ReadFile(h, buf, (DWORD)len, &nread, &ov))
+    {
+	if (GetLastError() != ERROR_IO_PENDING
+		|| !GetOverlappedResult(h, &ov, &nread, TRUE))
+	    nread = -1;
+    }
+
+    CloseHandle(ov.hEvent);
     return (int)nread;
 }
 
@@ -82,9 +92,19 @@ fd_write(sock_T fd, char *buf, size_t len)
 {
     HANDLE h = (HANDLE)fd;
     DWORD nwrite;
+    OVERLAPPED ov;
 
-    if (!WriteFile(h, buf, (DWORD)len, &nwrite, NULL))
-	return -1;
+    memset(&ov, 0, sizeof (OVERLAPPED));
+    ov.hEvent = CreateEvent(0, FALSE, FALSE, 0);
+
+    if (!WriteFile(h, buf, (DWORD)len, &nwrite, &ov))
+    {
+	if (GetLastError() != ERROR_IO_PENDING
+		|| !GetOverlappedResult(h, &ov, &nwrite, TRUE))
+	    nwrite = -1;
+    }
+
+    CloseHandle(ov.hEvent);
     return (int)nwrite;
 }
 
