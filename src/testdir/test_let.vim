@@ -41,7 +41,7 @@ endfunction
 
 func s:set_arg4(a) abort
   let b = a:
-  let b['a'] = 1
+  let b['b'] = 1
 endfunction
 
 func s:set_arg5(a) abort
@@ -57,7 +57,7 @@ func Test_let_arg_fail()
   call assert_fails('call s:set_arg1(1)', 'E46:')
   call assert_fails('call s:set_arg2(1)', 'E461:')
   call assert_fails('call s:set_arg3(1)', 'E46:')
-  call assert_fails('call s:set_arg4(1)', 'E46:')
+  call assert_fails('call s:set_arg4(1)', 'E741:')
   call assert_fails('call s:set_arg5(1)', 'E46:')
   let a = [0]
   call s:set_arg6(a)
