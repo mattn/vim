@@ -25,3 +25,40 @@ func Test_let()
   let s = "\na                     #1\nb                     #2"
   call assert_equal(s, out)
 endfunc
+
+func s:set_arg1(a) abort
+  let a:a = 1
+endfunction
+
+func s:set_arg2(a) abort
+  let a:b = 1
+endfunction
+
+func s:set_arg3(a) abort
+  let b = a:
+  let b['a'] = 1
+endfunction
+
+func s:set_arg4(a) abort
+  let b = a:
+  let b['a'] = 1
+endfunction
+
+func s:set_arg5(a) abort
+  let b = a:
+  let b['a'][0] = 1
+endfunction
+
+func s:set_arg6(a) abort
+  let a:a[0] = 1
+endfunction
+
+func Test_let_arg_fail()
+  call assert_fails('call s:set_arg1(1)', 'E46:')
+  call assert_fails('call s:set_arg2(1)', 'E461:')
+  call assert_fails('call s:set_arg3(1)', 'E46:')
+  call assert_fails('call s:set_arg4(1)', 'E46:')
+  call assert_fails('call s:set_arg5(1)', 'E46:')
+  let a = [0]
+  call s:set_arg6(a)
+endfunction

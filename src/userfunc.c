@@ -867,6 +867,9 @@ call_user_func(
 	}
     }
 
+    fc->l_varlist.lv_lock |= VAR_LOCKED;
+    fc->l_avars.dv_lock |= VAR_LOCKED;
+
     /* Don't redraw while executing the function. */
     ++RedrawingDisabled;
     save_sourcing_name = sourcing_name;

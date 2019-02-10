@@ -7919,6 +7919,13 @@ set_var(
     }
     else		    /* add a new variable */
     {
+	/* Can't ad "a:" variable. */
+	if (name[0] == 'a' && name[1] == ':')
+	{
+	    semsg(_(e_illvar), name);
+	    return;
+	}
+
 	/* Can't add "v:" variable. */
 	if (ht == &vimvarht)
 	{
