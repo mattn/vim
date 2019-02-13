@@ -689,17 +689,17 @@ display_errors(void)
 	for (p = (char *)error_ga.ga_data; *p; ++p)
 	    if (!isspace(*p))
 	    {
+#ifdef FEAT_GUI
 		(void)gui_mch_dialog(
-#ifdef FEAT_GUI
 				     gui.starting ? VIM_INFO :
-#endif
 					     VIM_ERROR,
-#ifdef FEAT_GUI
 				     gui.starting ? (char_u *)_("Message") :
-#endif
 					     (char_u *)_("Error"),
 				     (char_u *)p, (char_u *)_("&Ok"),
 					1, NULL, FALSE);
+#else
+		mch_errmsg(p);
+#endif
 		break;
 	    }
 	ga_clear(&error_ga);
