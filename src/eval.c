@@ -193,9 +193,10 @@ static struct vimvar
     {VV_NAME("termrfgresp",	 VAR_STRING), VV_RO},
     {VV_NAME("termrbgresp",	 VAR_STRING), VV_RO},
     {VV_NAME("termu7resp",	 VAR_STRING), VV_RO},
-    {VV_NAME("termstyleresp",	VAR_STRING), VV_RO},
-    {VV_NAME("termblinkresp",	VAR_STRING), VV_RO},
-    {VV_NAME("event",		VAR_DICT), VV_RO},
+    {VV_NAME("termstyleresp",	 VAR_STRING), VV_RO},
+    {VV_NAME("termblinkresp",	 VAR_STRING), VV_RO},
+    {VV_NAME("event",		 VAR_DICT), VV_RO},
+    {VV_NAME("mark",		 VAR_STRING), VV_RO},
 };
 
 /* shorthand */

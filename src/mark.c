@@ -56,6 +56,7 @@ setmark_pos(int c, pos_T *pos, int fnum)
 {
     int		i;
     buf_T	*buf;
+    char_u	key[2];
 
     /* Check for a special key (may cause islower() to crash). */
     if (c < 0)
@@ -71,7 +72,7 @@ setmark_pos(int c, pos_T *pos, int fnum)
 	}
 	else
 	    curwin->w_pcmark = *pos;
-	return OK;
+	goto theend;
     }
 
     buf = buflist_findnr(fnum);
@@ -81,7 +82,7 @@ setmark_pos(int c, pos_T *pos, int fnum)
     if (c == '"')
     {
 	buf->b_last_cursor = *pos;
-	return OK;
+	goto theend;
     }
 
     /* Allow setting '[ and '] for an autocommand that simulates reading a
@@ -89,12 +90,12 @@ setmark_pos(int c, pos_T *pos, int fnum)
     if (c == '[')
     {
 	buf->b_op_start = *pos;
-	return OK;
+	goto theend;
     }
     if (c == ']')
     {
 	buf->b_op_end = *pos;
-	return OK;
+	goto theend;
     }
 
     if (c == '<' || c == '>')
@@ -106,14 +107,14 @@ setmark_pos(int c, pos_T *pos, int fnum)
 	if (buf->b_visual.vi_mode == NUL)
 	    /* Visual_mode has not yet been set, use a sane default. */
 	    buf->b_visual.vi_mode = 'v';
-	return OK;
+	goto theend;
     }
 
     if (ASCII_ISLOWER(c))
     {
 	i = c - 'a';
 	buf->b_namedm[i] = *pos;
-	return OK;
+	goto theend;
     }
     if (ASCII_ISUPPER(c) || VIM_ISDIGIT(c))
     {
@@ -127,9 +128,18 @@ setmark_pos(int c, pos_T *pos, int fnum)
 #ifdef FEAT_VIMINFO
 	namedfm[i].time_set = vim_time();
 #endif
-	return OK;
+	goto theend;
     }
     return FAIL;
+
+theend:
+    key[0] = c;
+    key[1] = NUL;
+    set_vim_var_string(VV_MARK, key, -1);  /* set v:char */
+    apply_autocmds(EVENT_MARKSET, NULL, NULL, FALSE, curbuf);
+    set_vim_var_string(VV_MARK, NULL, -1);  /* clear v:char */
+
+    return OK;
 }
 
 /*
@@ -632,6 +642,7 @@ check_mark(pos_T *pos)
 clrallmarks(buf_T *buf)
 {
     static int		i = -1;
+    char_u		key[2];
 
     if (i == -1)	/* first call ever: initialize */
 	for (i = 0; i < NMARKS + 1; i++)
@@ -641,6 +652,11 @@ clrallmarks(buf_T *buf)
 #ifdef FEAT_VIMINFO
 	    namedfm[i].time_set = 0;
 #endif
+	    key[0] = i;
+	    key[1] = NUL;
+	    set_vim_var_string(VV_MARK, key, -1);  /* set v:char */
+	    apply_autocmds(EVENT_MARKUNSET, NULL, NULL, FALSE, curbuf);
+	    set_vim_var_string(VV_MARK, NULL, -1);  /* clear v:char */
 	}
 
     for (i = 0; i < NMARKS; i++)
@@ -848,6 +864,8 @@ ex_delmarks(exarg_T *eap)
 			curbuf->b_namedm[i - 'a'].lnum = 0;
 		    else
 		    {
+			char_u	key[2];
+
 			if (digit)
 			    n = i - '0' + NMARKS;
 			else
@@ -857,6 +875,12 @@ ex_delmarks(exarg_T *eap)
 #ifdef FEAT_VIMINFO
 			namedfm[n].time_set = 0;
 #endif
+			key[0] = i;
+			key[1] = NUL;
+			set_vim_var_string(VV_MARK, key, -1);  /* set v:char */
+			apply_autocmds(EVENT_MARKSET, NULL, NULL, FALSE, curbuf);
+			set_vim_var_string(VV_MARK, NULL, -1);  /* clear v:char */
+
 		    }
 		}
 	    }

@@ -147,6 +147,8 @@ static struct event_name
     {"InsertEnter",	EVENT_INSERTENTER},
     {"InsertLeave",	EVENT_INSERTLEAVE},
     {"InsertCharPre",	EVENT_INSERTCHARPRE},
+    {"MarkSet",		EVENT_MARKSET},
+    {"MarkUnset",	EVENT_MARKUNSET},
     {"MenuPopup",	EVENT_MENUPOPUP},
     {"OptionSet",	EVENT_OPTIONSET},
     {"QuickFixCmdPost",	EVENT_QUICKFIXCMDPOST},

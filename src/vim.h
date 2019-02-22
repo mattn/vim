@@ -1306,6 +1306,8 @@ enum auto_event
     EVENT_INSERTCHARPRE,	// before inserting a char
     EVENT_INSERTENTER,		// when entering Insert mode
     EVENT_INSERTLEAVE,		// when leaving Insert mode
+    EVENT_MARKSET,		// when set mark
+    EVENT_MARKUNSET,		// when unset mark
     EVENT_MENUPOPUP,		// just before popup menu is displayed
     EVENT_OPTIONSET,		// option was set
     EVENT_QUICKFIXCMDPOST,	// after :make, :grep etc.
@@ -1961,7 +1963,8 @@ typedef int sock_T;
 #define VV_TERMSTYLERESP 85
 #define VV_TERMBLINKRESP 86
 #define VV_EVENT	87
-#define VV_LEN		88	/* number of v: vars */
+#define VV_MARK		88
+#define VV_LEN		89	/* number of v: vars */
 
 /* used for v_number in VAR_SPECIAL */
 #define VVAL_FALSE	0L
