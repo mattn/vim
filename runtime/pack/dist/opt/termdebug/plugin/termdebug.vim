@@ -630,7 +630,7 @@ func s:InstallCommands()
   let save_cpo = &cpo
   set cpo&vim
 
-  command Break call s:SetBreakpoint()
+  command -nargs=? Break call s:SetBreakpoint(<q-args>)
   command Clear call s:ClearBreakpoint()
   command Step call s:SendCommand('-exec-step')
   command Over call s:SendCommand('-exec-next')
@@ -748,7 +748,7 @@ func s:DeleteCommands()
 endfunc
 
 " :Break - Set a breakpoint at the cursor position.
-func s:SetBreakpoint()
+func s:SetBreakpoint(at)
   " Setting a breakpoint may not work while the program is running.
   " Interrupt to make it work.
   let do_continue = 0
@@ -761,9 +761,11 @@ func s:SetBreakpoint()
     endif
     sleep 10m
   endif
+
   " Use the fname:lnum format, older gdb can't handle --source.
-  call s:SendCommand('-break-insert '
-        \ . fnameescape(expand('%:p')) . ':' . line('.'))
+  let at = empty(a:at) ?
+        \ fnameescape(expand('%:p')) . ':' . line('.') : a:at
+  call s:SendCommand('-break-insert ' . at)
   if do_continue
     call s:SendCommand('-exec-continue')
   endif
