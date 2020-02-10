@@ -1991,3 +1991,9 @@ func Test_job_start_fails()
   " this was leaking memory
   call assert_fails("call job_start([''])", "E474:")
 endfunc
+
+func Test_issue_5150()
+  let g:job = job_start(&shell, {})
+  call job_stop(g:job, 'kill')
+  call assert_equal(-1, job_info(g:job).exitval)
+endfunc
