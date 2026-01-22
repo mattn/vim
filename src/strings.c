@@ -1321,42 +1321,95 @@ f_blob2str(typval_T *argvars, typval_T *rettv)
 	from_encoding = NULL;
     }
 
-    idx = 0;
-    while (idx < blen)
+    // Special handling for UTF-16 encodings: convert entire blob before splitting by newlines
+    if (from_encoding != NULL && (STRNCMP(from_encoding, "utf-16", 6) == 0 || STRNCMP(from_encoding, "utf16", 5) == 0))
     {
-	char_u	*str;
-	char_u	*converted_str;
+	// Build a temporary buffer from the blob (without NUL terminator)
+	garray_T blob_ga;
+	ga_init2(&blob_ga, 1, blen + 1);
+	for (long i = 0; i < blen; i++)
+	    ga_append(&blob_ga, (int)(unsigned char)blob_get(blob, i));
+	ga_append(&blob_ga, NUL);  // Add NUL for string termination
 
-	str = string_from_blob(blob, &idx);
-	if (str == NULL)
-	    break;
+	// Use convert_string which handles iconv properly
+	char_u *converted = convert_string((char_u *)blob_ga.ga_data, from_encoding, p_enc);
+	ga_clear(&blob_ga);
 
-	converted_str = str;
-	if (from_encoding != NULL)
+	if (converted != NULL)
 	{
-	    converted_str = convert_string(str, from_encoding, p_enc);
-	    vim_free(str);
-	    if (converted_str == NULL)
+	    // Split by newlines and add to list
+	    char_u *p = converted;
+	    while (*p != NUL)
 	    {
-		semsg(_(e_str_encoding_from_failed), from_encoding);
-		goto done;
-	    }
-	}
+		char_u *line_start = p;
+		while (*p != NUL && *p != NL)
+		    p++;
 
-	if (validate_utf8)
+		// Add this line to the result list
+		char_u *line = vim_strnsave(line_start, p - line_start);
+		if (line != NULL)
+		{
+		    if (validate_utf8 && !utf_valid_string(line, NULL))
+		    {
+			vim_free(line);
+			semsg(_(e_str_encoding_from_failed), p_enc);
+			vim_free(converted);
+			goto done;
+		    }
+		    list_append_string(rettv->vval.v_list, line, -1);
+		    vim_free(line);
+		}
+
+		if (*p == NL)
+		    p++;
+	    }
+	    vim_free(converted);
+	}
+	else
 	{
-	    if (!utf_valid_string(converted_str, NULL))
-	    {
-		semsg(_(e_str_encoding_from_failed), p_enc);
-		vim_free(converted_str);
-		goto done;
-	    }
+	    semsg(_(e_str_encoding_from_failed), from_encoding);
 	}
+    }
+    else
+    {
+	// Original logic for non-UTF-16 encodings
+	idx = 0;
+	while (idx < blen)
+	{
+	    char_u	*str;
+	    char_u	*converted_str;
 
-	int ret = list_append_string(rettv->vval.v_list, converted_str, -1);
-	vim_free(converted_str);
-	if (ret == FAIL)
-	    break;
+	    str = string_from_blob(blob, &idx);
+	    if (str == NULL)
+		break;
+
+	    converted_str = str;
+	    if (from_encoding != NULL)
+	    {
+		converted_str = convert_string(str, from_encoding, p_enc);
+		vim_free(str);
+		if (converted_str == NULL)
+		{
+		    semsg(_(e_str_encoding_from_failed), from_encoding);
+		    goto done;
+		}
+	    }
+
+	    if (validate_utf8)
+	    {
+		if (!utf_valid_string(converted_str, NULL))
+		{
+		    semsg(_(e_str_encoding_from_failed), p_enc);
+		    vim_free(converted_str);
+		    goto done;
+		}
+	    }
+
+	    int ret = list_append_string(rettv->vval.v_list, converted_str, -1);
+	    vim_free(converted_str);
+	    if (ret == FAIL)
+		break;
+	}
     }
 
 done:
