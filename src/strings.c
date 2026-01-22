@@ -1324,25 +1324,42 @@ f_blob2str(typval_T *argvars, typval_T *rettv)
     // Special handling for UTF-16 encodings: convert entire blob before splitting by newlines
     if (from_encoding != NULL && (STRNCMP(from_encoding, "utf-16", 6) == 0 || STRNCMP(from_encoding, "utf16", 5) == 0))
     {
-	// Build a temporary buffer from the blob (without NUL terminator)
+	// Build a temporary buffer from the blob and convert with explicit length
 	garray_T blob_ga;
 	ga_init2(&blob_ga, 1, blen + 1);
 	for (long i = 0; i < blen; i++)
 	    ga_append(&blob_ga, (int)(unsigned char)blob_get(blob, i));
-	ga_append(&blob_ga, NUL);  // Add NUL for string termination
+	ga_append(&blob_ga, NUL);  // NUL terminator for safety
 
-	// Use convert_string which handles iconv properly
-	char_u *converted = convert_string((char_u *)blob_ga.ga_data, from_encoding, p_enc);
+	// Use string_convert_ext which accepts explicit length
+	vimconv_T vimconv;
+	vimconv.vc_type = CONV_NONE;
+	if (convert_setup(&vimconv, from_encoding, p_enc) == FAIL)
+	{
+	    ga_clear(&blob_ga);
+	    semsg(_(e_str_encoding_from_failed), from_encoding);
+	    goto done;
+	}
+	vimconv.vc_fail = TRUE;
+	int inlen = blen;  // Use actual blob length, not C string length
+	int outlen = 0;
+	char_u *converted = string_convert_ext(&vimconv, (char_u *)blob_ga.ga_data, &inlen, &outlen);
+	convert_setup(&vimconv, NULL, NULL);
 	ga_clear(&blob_ga);
 
 	if (converted != NULL)
 	{
+	    // outlen contains the output length from string_convert_ext
+	    // If not set, fall back to STRLEN (should be safe for converted UTF-8)
+	    int converted_len = (outlen > 0) ? outlen : (int)STRLEN(converted);
+	    
 	    // Split by newlines and add to list
 	    char_u *p = converted;
-	    while (*p != NUL)
+	    char_u *end = converted + converted_len;
+	    while (p < end)
 	    {
 		char_u *line_start = p;
-		while (*p != NUL && *p != NL)
+		while (p < end && *p != NL)
 		    p++;
 
 		// Add this line to the result list
