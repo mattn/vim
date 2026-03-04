@@ -336,4 +336,199 @@ func Test_change_bufline_with_textlock()
   bwipe!
 endfunc
 
+func Test_applytextedits_basic()
+  new
+  call setline(1, ['hello world', 'foo bar baz', 'goodbye'])
+  let b = bufnr('%')
+
+  " Single replacement within one line
+  call assert_equal(0, applytextedits(b, [
+    \ {'range': {'start': {'line': 0, 'character': 6},
+    \            'end':   {'line': 0, 'character': 11}},
+    \  'newText': 'vim'}
+    \ ]))
+  call assert_equal('hello vim', getline(1))
+  call assert_equal('foo bar baz', getline(2))
+  call assert_equal('goodbye', getline(3))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_multiline_delete()
+  new
+  call setline(1, ['line one', 'line two', 'line three', 'line four'])
+
+  " Delete lines 2-3 (0-based lines 1-2)
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 1, 'character': 0},
+    \            'end':   {'line': 3, 'character': 0}},
+    \  'newText': ''}
+    \ ]))
+  call assert_equal(['line one', 'line four'], getline(1, '$'))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_insert()
+  new
+  call setline(1, ['hello world'])
+
+  " Insert at position (empty range)
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 0, 'character': 5},
+    \            'end':   {'line': 0, 'character': 5}},
+    \  'newText': ' beautiful'}
+    \ ]))
+  call assert_equal('hello beautiful world', getline(1))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_newline_in_newtext()
+  new
+  call setline(1, ['hello world'])
+
+  " Replace with text containing newlines
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 0, 'character': 5},
+    \            'end':   {'line': 0, 'character': 5}},
+    \  'newText': "\nbeautiful\n"}
+    \ ]))
+  call assert_equal(['hello', 'beautiful', ' world'], getline(1, '$'))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_multiple_edits_same_line()
+  new
+  call setline(1, ['foo bar baz'])
+
+  " Two edits on the same line (non-overlapping)
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 0, 'character': 0},
+    \            'end':   {'line': 0, 'character': 3}},
+    \  'newText': 'FOO'},
+    \ {'range': {'start': {'line': 0, 'character': 8},
+    \            'end':   {'line': 0, 'character': 11}},
+    \  'newText': 'BAZ'}
+    \ ]))
+  call assert_equal('FOO bar BAZ', getline(1))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_undo()
+  new
+  call setline(1, ['aaa', 'bbb', 'ccc'])
+  " Write to file and re-read to establish clean undo state
+  write! Xundotest
+  edit! Xundotest
+  call assert_equal(['aaa', 'bbb', 'ccc'], getline(1, '$'))
+
+  " Apply multiple edits
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 0, 'character': 0},
+    \            'end':   {'line': 0, 'character': 3}},
+    \  'newText': 'AAA'},
+    \ {'range': {'start': {'line': 2, 'character': 0},
+    \            'end':   {'line': 2, 'character': 3}},
+    \  'newText': 'CCC'}
+    \ ]))
+  call assert_equal(['AAA', 'bbb', 'CCC'], getline(1, '$'))
+
+  " Single undo should revert all edits
+  undo
+  call assert_equal(['aaa', 'bbb', 'ccc'], getline(1, '$'))
+
+  bwipe!
+  call delete('Xundotest')
+endfunc
+
+func Test_applytextedits_other_buffer()
+  new
+  call setline(1, ['target buffer'])
+  let target_buf = bufnr('%')
+  new
+
+  " Apply edit to the other buffer
+  call assert_equal(0, applytextedits(target_buf, [
+    \ {'range': {'start': {'line': 0, 'character': 0},
+    \            'end':   {'line': 0, 'character': 6}},
+    \  'newText': 'modified'}
+    \ ]))
+  call assert_equal(['modified buffer'], getbufline(target_buf, 1, '$'))
+
+  bwipe!
+  exe 'bwipe! ' .. target_buf
+endfunc
+
+func Test_applytextedits_error_cases()
+  new
+  call setline(1, ['test'])
+
+  " Invalid buffer
+  call assert_equal(1, applytextedits(9999, []))
+
+  " Not a list
+  call assert_fails("call applytextedits(bufnr('%'), 'string')", 'E714:')
+
+  " Invalid dict structure - missing range
+  call assert_fails("call applytextedits(bufnr('%'), [{'newText': 'x'}])",
+    \ 'E475:')
+
+  " Overlapping edits
+  call assert_fails("call applytextedits(bufnr('%'), [" ..
+    \ "{'range': {'start': {'line': 0, 'character': 0}," ..
+    \ " 'end': {'line': 0, 'character': 3}}, 'newText': 'a'}," ..
+    \ "{'range': {'start': {'line': 0, 'character': 2}," ..
+    \ " 'end': {'line': 0, 'character': 4}}, 'newText': 'b'}" ..
+    \ "])", 'E475:')
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_utf16_surrogate()
+  new
+  " String with emoji (U+1F600 = surrogate pair in UTF-16, 2 code units)
+  call setline(1, ["hello\U0001F600world"])
+
+  " The emoji takes 2 UTF-16 code units, so 'world' starts at UTF-16 offset 7
+  " (5 for 'hello' + 2 for emoji = 7)
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 0, 'character': 7},
+    \            'end':   {'line': 0, 'character': 12}},
+    \  'newText': 'VIM'}
+    \ ]))
+  call assert_equal("hello\U0001F600VIM", getline(1))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_empty_list()
+  new
+  call setline(1, ['unchanged'])
+
+  " Empty list should succeed and do nothing
+  call assert_equal(0, applytextedits(bufnr('%'), []))
+  call assert_equal('unchanged', getline(1))
+
+  bwipe!
+endfunc
+
+func Test_applytextedits_replace_multiline_with_multiline()
+  new
+  call setline(1, ['first', 'second', 'third', 'fourth'])
+
+  " Replace lines 2-3 with new content
+  call assert_equal(0, applytextedits(bufnr('%'), [
+    \ {'range': {'start': {'line': 1, 'character': 0},
+    \            'end':   {'line': 2, 'character': 5}},
+    \  'newText': "replaced\nlines\nhere"}
+    \ ]))
+  call assert_equal(['first', 'replaced', 'lines', 'here', 'fourth'],
+    \ getline(1, '$'))
+
+  bwipe!
+endfunc
+
 " vim: shiftwidth=2 sts=2 expandtab

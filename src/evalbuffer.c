@@ -376,6 +376,463 @@ f_appendbufline(typval_T *argvars, typval_T *rettv)
 }
 
 /*
+ * Structure to hold a parsed text edit.
+ */
+typedef struct
+{
+    linenr_T	start_lnum;	// 1-based
+    int		start_col;	// byte offset
+    linenr_T	end_lnum;	// 1-based
+    int		end_col;	// byte offset
+    char_u	*newText;
+} text_edit_T;
+
+/*
+ * Comparator for sorting text edits in reverse order (by position, descending).
+ */
+    static int
+text_edit_compare(const void *a, const void *b)
+{
+    const text_edit_T *ea = (const text_edit_T *)a;
+    const text_edit_T *eb = (const text_edit_T *)b;
+
+    if (eb->start_lnum != ea->start_lnum)
+	return eb->start_lnum - ea->start_lnum;
+    return eb->start_col - ea->start_col;
+}
+
+/*
+ * "apply_text_edits()" function
+ *
+ * Applies a list of LSP TextEdit objects to a buffer atomically.
+ * All edits are applied in a single undo block.
+ *
+ * apply_text_edits({bufnr}, {edits})
+ *   {bufnr}: buffer number
+ *   {edits}: list of dicts with 'range' and 'newText' keys
+ *            range uses 0-based line and UTF-16 character offsets
+ *   Returns: 0 = success, 1 = failure
+ */
+    void
+f_applytextedits(typval_T *argvars, typval_T *rettv)
+{
+    buf_T	*buf;
+    list_T	*edits_list;
+    listitem_T	*li;
+    text_edit_T	*edits = NULL;
+    int		num_edits;
+    int		i;
+    int		is_curbuf;
+    cob_T	cob;
+    linenr_T	first_lnum = MAXLNUM;
+    linenr_T	last_lnum = 0;
+
+    rettv->vval.v_number = 1;	// FAIL by default
+
+    if (in_vim9script()
+	    && (check_for_buffer_arg(argvars, 0) == FAIL
+		|| check_for_list_arg(argvars, 1) == FAIL))
+	return;
+
+    buf = tv_get_buf(&argvars[0], FALSE);
+    if (buf == NULL)
+	return;
+
+    if (argvars[1].v_type != VAR_LIST)
+    {
+	emsg(_(e_list_required));
+	return;
+    }
+    edits_list = argvars[1].vval.v_list;
+    if (edits_list == NULL || list_len(edits_list) == 0)
+    {
+	rettv->vval.v_number = 0;	// nothing to do, OK
+	return;
+    }
+
+    if (buf->b_ml.ml_mfp == NULL)
+	return;
+
+    num_edits = list_len(edits_list);
+    edits = ALLOC_MULT(text_edit_T, num_edits);
+    if (edits == NULL)
+	return;
+    vim_memset(edits, 0, sizeof(text_edit_T) * num_edits);
+
+    // Parse edits from the list of dicts
+    CHECK_LIST_MATERIALIZE(edits_list);
+    i = 0;
+    FOR_ALL_LIST_ITEMS(edits_list, li)
+    {
+	dict_T	    *edit_dict;
+	dict_T	    *range_dict;
+	dict_T	    *start_dict;
+	dict_T	    *end_dict;
+	dictitem_T  *di;
+	varnumber_T start_line, start_char, end_line, end_char;
+	char_u	    *line_str;
+
+	if (li->li_tv.v_type != VAR_DICT || li->li_tv.vval.v_dict == NULL)
+	{
+	    semsg(_(e_invalid_argument_str), "edit must be a dict");
+	    goto free_edits;
+	}
+	edit_dict = li->li_tv.vval.v_dict;
+
+	// Get range
+	di = dict_find(edit_dict, (char_u *)"range", -1);
+	if (di == NULL || di->di_tv.v_type != VAR_DICT
+						|| di->di_tv.vval.v_dict == NULL)
+	{
+	    semsg(_(e_invalid_argument_str), "edit.range must be a dict");
+	    goto free_edits;
+	}
+	range_dict = di->di_tv.vval.v_dict;
+
+	// Get start
+	di = dict_find(range_dict, (char_u *)"start", -1);
+	if (di == NULL || di->di_tv.v_type != VAR_DICT
+						|| di->di_tv.vval.v_dict == NULL)
+	{
+	    semsg(_(e_invalid_argument_str), "range.start must be a dict");
+	    goto free_edits;
+	}
+	start_dict = di->di_tv.vval.v_dict;
+	start_line = dict_get_number(start_dict, "line");
+	start_char = dict_get_number(start_dict, "character");
+
+	// Get end
+	di = dict_find(range_dict, (char_u *)"end", -1);
+	if (di == NULL || di->di_tv.v_type != VAR_DICT
+						|| di->di_tv.vval.v_dict == NULL)
+	{
+	    semsg(_(e_invalid_argument_str), "range.end must be a dict");
+	    goto free_edits;
+	}
+	end_dict = di->di_tv.vval.v_dict;
+	end_line = dict_get_number(end_dict, "line");
+	end_char = dict_get_number(end_dict, "character");
+
+	// Get newText
+	di = dict_find(edit_dict, (char_u *)"newText", -1);
+	if (di == NULL)
+	{
+	    semsg(_(e_invalid_argument_str), "edit.newText is required");
+	    goto free_edits;
+	}
+
+	// Convert 0-based line to 1-based lnum
+	edits[i].start_lnum = (linenr_T)(start_line + 1);
+	edits[i].end_lnum = (linenr_T)(end_line + 1);
+	edits[i].newText = vim_strsave(tv_get_string(&di->di_tv));
+	if (edits[i].newText == NULL)
+	    goto free_edits;
+
+	// Convert UTF-16 character offset to byte offset
+	// Need to get the actual line to do the conversion
+	if (edits[i].start_lnum >= 1
+			    && edits[i].start_lnum <= buf->b_ml.ml_line_count)
+	{
+	    line_str = ml_get_buf(buf, edits[i].start_lnum, FALSE);
+	    edits[i].start_col = utf16_offset_to_byte(line_str,
+							  (int)start_char);
+	}
+	else
+	    edits[i].start_col = 0;
+
+	if (edits[i].end_lnum >= 1
+				&& edits[i].end_lnum <= buf->b_ml.ml_line_count)
+	{
+	    line_str = ml_get_buf(buf, edits[i].end_lnum, FALSE);
+	    edits[i].end_col = utf16_offset_to_byte(line_str, (int)end_char);
+	}
+	else
+	    edits[i].end_col = 0;
+
+	// Track the range of lines affected
+	if (edits[i].start_lnum < first_lnum)
+	    first_lnum = edits[i].start_lnum;
+	if (edits[i].end_lnum > last_lnum)
+	    last_lnum = edits[i].end_lnum;
+
+	i++;
+    }
+
+    // Sort edits in reverse order (bottom-to-top, right-to-left)
+    qsort(edits, (size_t)num_edits, sizeof(text_edit_T), text_edit_compare);
+
+    // Check for overlapping edits (after sorting, each edit's start must be
+    // >= the next edit's end position, since we sorted in reverse)
+    for (i = 0; i < num_edits - 1; i++)
+    {
+	if (edits[i + 1].end_lnum > edits[i].start_lnum
+		|| (edits[i + 1].end_lnum == edits[i].start_lnum
+		    && edits[i + 1].end_col > edits[i].start_col))
+	{
+	    semsg(_(e_invalid_argument_str), "overlapping edits");
+	    goto free_edits;
+	}
+    }
+
+    // Clamp lnum range
+    if (first_lnum < 1)
+	first_lnum = 1;
+    if (last_lnum > buf->b_ml.ml_line_count)
+	last_lnum = buf->b_ml.ml_line_count;
+
+    // After this don't use "return", goto "cleanup"!
+    is_curbuf = buf == curbuf;
+    if (!is_curbuf)
+	change_other_buffer_prepare(&cob, buf);
+
+    // When coming here from Insert mode, sync undo, so that this can be
+    // undone separately from what was previously inserted.
+    if (u_sync_once == 2)
+    {
+	u_sync_once = 1;
+	u_sync(TRUE);
+    }
+
+    if (u_save(first_lnum - 1, last_lnum + 1) == FAIL)
+	goto cleanup;
+
+    // Apply edits in reverse order (bottom-to-top) so that earlier edits
+    // don't shift the positions of later edits.
+    for (i = 0; i < num_edits; i++)
+    {
+	char_u	    *prefix = NULL;
+	char_u	    *suffix = NULL;
+	char_u	    *old_line;
+	linenr_T    slnum = edits[i].start_lnum;
+	int	    scol = edits[i].start_col;
+	linenr_T    elnum = edits[i].end_lnum;
+	int	    ecol = edits[i].end_col;
+	char_u	    *new_text = edits[i].newText;
+	linenr_T    old_count = elnum - slnum + 1;
+	linenr_T    lnum;
+	garray_T    new_lines;
+	int	    j;
+
+	// Handle case where start_lnum is beyond buffer end (append)
+	if (slnum > curbuf->b_ml.ml_line_count)
+	{
+	    slnum = curbuf->b_ml.ml_line_count + 1;
+	    scol = 0;
+	    elnum = slnum;
+	    ecol = 0;
+	    old_count = 0;
+	}
+
+	// Get prefix: text before the edit start on the start line
+	if (slnum <= curbuf->b_ml.ml_line_count)
+	{
+	    old_line = ml_get(slnum);
+	    prefix = vim_strnsave(old_line, (size_t)scol);
+	}
+	else
+	    prefix = vim_strsave((char_u *)"");
+
+	// Get suffix: text after the edit end on the end line
+	if (elnum <= curbuf->b_ml.ml_line_count)
+	{
+	    old_line = ml_get(elnum);
+	    suffix = vim_strsave(old_line + ecol);
+	}
+	else
+	    suffix = vim_strsave((char_u *)"");
+
+	if (prefix == NULL || suffix == NULL)
+	{
+	    vim_free(prefix);
+	    vim_free(suffix);
+	    goto cleanup;
+	}
+
+	// Split newText by newlines
+	ga_init2(&new_lines, (int)sizeof(char_u *), 4);
+	{
+	    char_u  *p = new_text;
+	    char_u  *start = p;
+
+	    for (;;)
+	    {
+		if (*p == '\n' || *p == NUL)
+		{
+		    char_u *seg = vim_strnsave(start, (size_t)(p - start));
+		    if (seg == NULL || ga_grow(&new_lines, 1) == FAIL)
+		    {
+			vim_free(seg);
+			for (j = 0; j < new_lines.ga_len; j++)
+			    vim_free(((char_u **)new_lines.ga_data)[j]);
+			ga_clear(&new_lines);
+			vim_free(prefix);
+			vim_free(suffix);
+			goto cleanup;
+		    }
+		    ((char_u **)new_lines.ga_data)[new_lines.ga_len++] = seg;
+		    if (*p == NUL)
+			break;
+		    start = p + 1;
+		}
+		p++;
+	    }
+	}
+
+	// Build the replacement lines:
+	// First line: prefix + first segment of newText
+	// Middle lines: middle segments of newText
+	// Last line: last segment of newText + suffix
+	{
+	    char_u  **segments = (char_u **)new_lines.ga_data;
+	    int	    num_new = new_lines.ga_len;
+	    long    lines_added;
+
+	    // Build first line: prefix + segments[0]
+	    if (num_new == 1)
+	    {
+		// Single segment: prefix + segment + suffix
+		char_u *line = alloc(
+			(unsigned)(STRLEN(prefix) + STRLEN(segments[0])
+						      + STRLEN(suffix) + 1));
+		if (line == NULL)
+		{
+		    for (j = 0; j < num_new; j++)
+			vim_free(segments[j]);
+		    ga_clear(&new_lines);
+		    vim_free(prefix);
+		    vim_free(suffix);
+		    goto cleanup;
+		}
+		STRCPY(line, prefix);
+		STRCAT(line, segments[0]);
+		STRCAT(line, suffix);
+
+		if (slnum <= curbuf->b_ml.ml_line_count)
+		{
+		    ml_replace(slnum, line, TRUE);
+		    // Delete extra old lines (when edit spans multiple lines)
+		    if (old_count > 1)
+		    {
+			for (lnum = 0; lnum < old_count - 1; lnum++)
+			    ml_delete_flags(slnum + 1, ML_DEL_MESSAGE);
+		    }
+		}
+		else
+		{
+		    ml_append(curbuf->b_ml.ml_line_count, line, 0, FALSE);
+		    vim_free(line);
+		}
+	    }
+	    else
+	    {
+		// Multiple segments
+		// First line: prefix + segments[0]
+		char_u *first_line = alloc(
+			(unsigned)(STRLEN(prefix) + STRLEN(segments[0]) + 1));
+		// Last line: segments[num_new-1] + suffix
+		char_u *last_line = alloc(
+			(unsigned)(STRLEN(segments[num_new - 1])
+							+ STRLEN(suffix) + 1));
+
+		if (first_line == NULL || last_line == NULL)
+		{
+		    vim_free(first_line);
+		    vim_free(last_line);
+		    for (j = 0; j < num_new; j++)
+			vim_free(segments[j]);
+		    ga_clear(&new_lines);
+		    vim_free(prefix);
+		    vim_free(suffix);
+		    goto cleanup;
+		}
+
+		STRCPY(first_line, prefix);
+		STRCAT(first_line, segments[0]);
+		STRCPY(last_line, segments[num_new - 1]);
+		STRCAT(last_line, suffix);
+
+		// Replace/append the first line
+		if (slnum <= curbuf->b_ml.ml_line_count)
+		    ml_replace(slnum, first_line, TRUE);
+		else
+		{
+		    ml_append(curbuf->b_ml.ml_line_count, first_line, 0,
+								       FALSE);
+		    vim_free(first_line);
+		}
+
+		// Delete the old lines between start and end
+		// (lines slnum+1 to elnum, if they exist)
+		if (old_count > 1)
+		{
+		    for (lnum = 0; lnum < old_count - 1; lnum++)
+			ml_delete_flags(slnum + 1, ML_DEL_MESSAGE);
+		}
+
+		// Append middle lines (segments[1] to segments[num_new-2])
+		for (j = 1; j < num_new - 1; j++)
+		    ml_append(slnum + j - 1, segments[j], 0, FALSE);
+
+		// Append the last line
+		ml_append(slnum + num_new - 2, last_line, 0, FALSE);
+		vim_free(last_line);
+	    }
+
+	    lines_added = (long)num_new - (long)old_count;
+
+	    // Adjust marks for line count changes
+	    if (lines_added != 0)
+		mark_adjust(slnum + 1,
+			old_count > 1 ? slnum + old_count - 1 : MAXLNUM,
+			(long)MAXLNUM,
+			lines_added);
+
+	    changed_lines(slnum, 0,
+		    slnum + (old_count > 0 ? old_count : 1),
+		    lines_added);
+
+	    for (j = 0; j < num_new; j++)
+		vim_free(segments[j]);
+	    ga_clear(&new_lines);
+	}
+
+	vim_free(prefix);
+	vim_free(suffix);
+    }
+
+    // Adjust cursor for all windows showing this buffer
+    {
+	tabpage_T   *tp;
+	win_T	    *wp;
+
+	FOR_ALL_TAB_WINDOWS(tp, wp)
+	    if (wp->w_buffer == buf)
+	    {
+		if (wp->w_cursor.lnum > curbuf->b_ml.ml_line_count)
+		    wp->w_cursor.lnum = curbuf->b_ml.ml_line_count;
+		wp->w_valid = 0;
+	    }
+	check_cursor_col();
+	if (curwin->w_buffer == curbuf)
+	    update_topline();
+    }
+
+    rettv->vval.v_number = 0;	// OK
+
+cleanup:
+    if (!is_curbuf)
+	change_other_buffer_restore(&cob);
+
+free_edits:
+    if (edits != NULL)
+    {
+	for (i = 0; i < num_edits; i++)
+	    vim_free(edits[i].newText);
+	vim_free(edits);
+    }
+}
+
+/*
  * "bufadd(expr)" function
  */
     void

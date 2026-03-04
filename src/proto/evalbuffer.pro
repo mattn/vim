@@ -4,6 +4,7 @@ buf_T *buflist_find_by_name(char_u *name, int curtab_only);
 buf_T *find_buffer(typval_T *avar);
 void f_append(typval_T *argvars, typval_T *rettv);
 void f_appendbufline(typval_T *argvars, typval_T *rettv);
+void f_applytextedits(typval_T *argvars, typval_T *rettv);
 void f_bufadd(typval_T *argvars, typval_T *rettv);
 void f_bufexists(typval_T *argvars, typval_T *rettv);
 void f_buflisted(typval_T *argvars, typval_T *rettv);
