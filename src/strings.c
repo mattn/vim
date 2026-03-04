@@ -2185,6 +2185,46 @@ f_strtrans(typval_T *argvars, typval_T *rettv)
     rettv->vval.v_string = transstr(tv_get_string(&argvars[0]));
 }
 
+/*
+ * Convert a UTF-16 code unit offset to a byte offset in a UTF-8 string.
+ * This is the reverse of what f_utf16idx() does.
+ * Returns the byte offset, or -1 if the UTF-16 offset is beyond the string.
+ */
+    int
+utf16_offset_to_byte(char_u *str, int utf16_idx)
+{
+    char_u	*p = str;
+    int		utf16_count = 0;
+
+    if (utf16_idx == 0)
+	return 0;
+
+    while (*p != NUL)
+    {
+	int	clen = mb_ptr2len(p);
+	int	c = (clen > 1) ? utf_ptr2char(p) : *p;
+
+	if (c > 0xFFFF)
+	    utf16_count += 2;	// surrogate pair
+	else
+	    utf16_count++;
+
+	if (utf16_count >= utf16_idx)
+	{
+	    // If we hit exactly the target, return position after this char.
+	    // If we overshot (surrogate pair), return position of this char.
+	    if (utf16_count == utf16_idx)
+		return (int)(p + clen - str);
+	    else
+		return (int)(p - str);
+	}
+
+	p += clen;
+    }
+
+    // utf16_idx is at or beyond end of string
+    return (int)(p - str);
+}
 
 /*
  * "utf16idx()" function

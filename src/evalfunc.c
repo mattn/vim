@@ -1949,6 +1949,8 @@ static const funcentry_T global_functions[] =
 			ret_number_bool,    f_append},
     {"appendbufline",	3, 3, FEARG_3,	    arg3_setbufline,
 			ret_number_bool,    f_appendbufline},
+    {"applytextedits",	2, 2, 0,	    arg2_buffer_list_any,
+			ret_number_bool,    f_applytextedits},
     {"argc",		0, 1, 0,	    arg1_number,
 			ret_number,	    f_argc},
     {"argidx",		0, 0, 0,	    NULL,

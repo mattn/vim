@@ -47,6 +47,7 @@ void f_strcharpart(typval_T *argvars, typval_T *rettv);
 void f_strpart(typval_T *argvars, typval_T *rettv);
 void f_strridx(typval_T *argvars, typval_T *rettv);
 void f_strtrans(typval_T *argvars, typval_T *rettv);
+int utf16_offset_to_byte(char_u *str, int utf16_idx);
 void f_utf16idx(typval_T *argvars, typval_T *rettv);
 void f_tolower(typval_T *argvars, typval_T *rettv);
 void f_toupper(typval_T *argvars, typval_T *rettv);
