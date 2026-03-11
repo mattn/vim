@@ -880,11 +880,34 @@ string_count(char_u *haystack, char_u *needle, int ic)
     long	n = 0;
     char_u	*p = haystack;
     char_u	*next;
+    int		c;
 
     if (p == NULL || needle == NULL || *needle == NUL)
 	return 0;
 
     size_t  needlelen = STRLEN(needle);
+    if (needlelen == 1)
+    {
+	c = *needle;
+	if (ic)
+	{
+	    c = TOLOWER_ASC(c);
+	    while (*p != NUL)
+	    {
+		if (TOLOWER_ASC(*p) == c)
+		    ++n;
+		MB_PTR_ADV(p);
+	    }
+	}
+	else
+	    while ((p = vim_strchr(p, c)) != NULL)
+	    {
+		++n;
+		++p;
+	    }
+	return n;
+    }
+
     if (ic)
     {
 	while (*p != NUL)
