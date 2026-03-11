@@ -1790,15 +1790,22 @@ f_stridx(typval_T *argvars, typval_T *rettv)
     if (argvars[2].v_type != VAR_UNKNOWN)
     {
 	int	    error = FALSE;
+	int	    haystack_len;
 
 	start_idx = (int)tv_get_number_chk(&argvars[2], &error);
-	if (error || start_idx >= (int)STRLEN(haystack))
+	haystack_len = (int)STRLEN(haystack);
+	if (error || start_idx >= haystack_len)
 	    return;
 	if (start_idx >= 0)
 	    haystack += start_idx;
     }
 
-    pos	= (char_u *)strstr((char *)haystack, (char *)needle);
+    if (*needle == NUL)
+	pos = haystack;
+    else if (needle[1] == NUL)
+	pos = vim_strchr(haystack, *needle);
+    else
+	pos = (char_u *)strstr((char *)haystack, (char *)needle);
     if (pos != NULL)
 	rettv->vval.v_number = (varnumber_T)(pos - save_haystack);
 }
