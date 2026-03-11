@@ -2595,6 +2595,7 @@ tv_op_number(typval_T *tv1, typval_T *tv2, char_u *op)
 {
     varnumber_T	n;
     int		failed = FALSE;
+    varnumber_T	n2 = 0;
 
     n = tv_get_number(tv1);
     if (tv2->v_type == VAR_FLOAT)
@@ -2616,13 +2617,14 @@ tv_op_number(typval_T *tv1, typval_T *tv2, char_u *op)
     }
     else
     {
+	n2 = tv_get_number(tv2);
 	switch (*op)
 	{
-	    case '+': n += tv_get_number(tv2); break;
-	    case '-': n -= tv_get_number(tv2); break;
-	    case '*': n *= tv_get_number(tv2); break;
-	    case '/': n = num_divide(n, tv_get_number(tv2), &failed); break;
-	    case '%': n = num_modulus(n, tv_get_number(tv2), &failed); break;
+	    case '+': n += n2; break;
+	    case '-': n -= n2; break;
+	    case '*': n *= n2; break;
+	    case '/': n = num_divide(n, n2, &failed); break;
+	    case '%': n = num_modulus(n, n2, &failed); break;
 	}
 	clear_tv(tv1);
 	tv1->v_type = VAR_NUMBER;
@@ -4382,6 +4384,16 @@ eval_addsub_number(typval_T *tv1, typval_T *tv2, int op)
     int		error = FALSE;
     varnumber_T	n1, n2;
     float_T	f1 = 0, f2 = 0;
+
+    if (tv1->v_type == VAR_NUMBER && tv2->v_type == VAR_NUMBER)
+    {
+	n1 = tv1->vval.v_number;
+	n2 = tv2->vval.v_number;
+	clear_tv(tv1);
+	tv1->v_type = VAR_NUMBER;
+	tv1->vval.v_number = op == '+' ? n1 + n2 : n1 - n2;
+	return OK;
+    }
 
     if (tv1->v_type == VAR_FLOAT)
     {
