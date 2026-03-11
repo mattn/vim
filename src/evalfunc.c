@@ -5496,19 +5496,22 @@ f_get(typval_T *argvars, typval_T *rettv)
 
     if (argvars[0].v_type == VAR_BLOB)
     {
+	blob_T	*b = argvars[0].vval.v_blob;
 	int error = FALSE;
 	int idx = tv_get_number_chk(&argvars[1], &error);
+	int len;
 
-	if (!error)
+	if (!error && b != NULL)
 	{
+	    len = blob_len(b);
 	    rettv->v_type = VAR_NUMBER;
 	    if (idx < 0)
-		idx = blob_len(argvars[0].vval.v_blob) + idx;
-	    if (idx < 0 || idx >= blob_len(argvars[0].vval.v_blob))
+		idx = len + idx;
+	    if (idx < 0 || idx >= len)
 		rettv->vval.v_number = -1;
 	    else
 	    {
-		rettv->vval.v_number = blob_get(argvars[0].vval.v_blob, idx);
+		rettv->vval.v_number = blob_get(b, idx);
 		tv = rettv;
 	    }
 	}
@@ -8170,10 +8173,12 @@ index_func_blob(typval_T *argvars, typval_T *rettv)
     int		start = 0;
     int		error = FALSE;
     int		ic = FALSE;
+    int		blen;
 
     b = argvars[0].vval.v_blob;
     if (b == NULL)
 	return;
+    blen = blob_len(b);
 
     if (argvars[2].v_type != VAR_UNKNOWN)
     {
@@ -8184,12 +8189,12 @@ index_func_blob(typval_T *argvars, typval_T *rettv)
 
     if (start < 0)
     {
-	start = blob_len(b) + start;
+	start = blen + start;
 	if (start < 0)
 	    start = 0;
     }
 
-    for (int idx = start; idx < blob_len(b); ++idx)
+    for (int idx = start; idx < blen; ++idx)
     {
 	tv.v_type = VAR_NUMBER;
 	tv.vval.v_number = blob_get(b, idx);
@@ -8327,14 +8332,16 @@ indexof_eval_expr(typval_T *expr)
 indexof_blob(blob_T *b, long startidx, typval_T *expr)
 {
     long	idx = 0;
+    int		blen;
 
     if (b == NULL)
 	return -1;
+    blen = blob_len(b);
 
     if (startidx < 0)
     {
 	// negative index: index from the last byte
-	startidx = blob_len(b) + startidx;
+	startidx = blen + startidx;
 	if (startidx < 0)
 	    startidx = 0;
     }
@@ -8343,7 +8350,7 @@ indexof_blob(blob_T *b, long startidx, typval_T *expr)
     set_vim_var_type(VV_VAL, VAR_NUMBER);
 
     int		called_emsg_start = called_emsg;
-    for (idx = startidx; idx < blob_len(b); ++idx)
+    for (idx = startidx; idx < blen; ++idx)
     {
 	set_vim_var_nr(VV_KEY, idx);
 	set_vim_var_nr(VV_VAL, blob_get(b, idx));
