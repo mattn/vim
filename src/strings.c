@@ -2124,9 +2124,8 @@ f_strridx(typval_T *argvars, typval_T *rettv)
     char_u	buf[NUMBUFLEN];
     char_u	*needle;
     char_u	*haystack;
-    char_u	*rest;
-    char_u	*lastmatch = NULL;
-    int		haystack_len, end_idx;
+    char_u	*p;
+    int		haystack_len, end_idx, needle_len;
 
     if (in_vim9script()
 	    && (check_for_string_arg(argvars, 0) == FAIL
@@ -2142,6 +2141,7 @@ f_strridx(typval_T *argvars, typval_T *rettv)
 	return;		// type error; errmsg already given
 
     haystack_len = (int)STRLEN(haystack);
+    needle_len = (int)STRLEN(needle);
     if (argvars[2].v_type != VAR_UNKNOWN)
     {
 	// Third argument: upper limit for index
@@ -2152,26 +2152,35 @@ f_strridx(typval_T *argvars, typval_T *rettv)
     else
 	end_idx = haystack_len;
 
-    if (*needle == NUL)
+    if (needle_len == 0)
     {
 	// Empty string matches past the end.
-	lastmatch = haystack + end_idx;
+	rettv->vval.v_number = end_idx;
+	return;
     }
-    else
+    if (needle_len > haystack_len)
+	return;
+
+    if (end_idx > haystack_len - needle_len)
+	end_idx = haystack_len - needle_len;
+
+    if (needle_len == 1)
     {
-	for (rest = haystack; *rest != '\0'; ++rest)
-	{
-	    rest = (char_u *)strstr((char *)rest, (char *)needle);
-	    if (rest == NULL || rest > haystack + end_idx)
-		break;
-	    lastmatch = rest;
-	}
+	for (p = haystack + end_idx; p >= haystack; --p)
+	    if (*p == *needle)
+	    {
+		rettv->vval.v_number = (varnumber_T)(p - haystack);
+		return;
+	    }
+	return;
     }
 
-    if (lastmatch == NULL)
-	rettv->vval.v_number = -1;
-    else
-	rettv->vval.v_number = (varnumber_T)(lastmatch - haystack);
+    for (p = haystack + end_idx; p >= haystack; --p)
+	if (*p == *needle && STRNCMP(p, needle, needle_len) == 0)
+	{
+	    rettv->vval.v_number = (varnumber_T)(p - haystack);
+	    return;
+	}
 }
 
 /*
