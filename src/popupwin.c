@@ -4319,15 +4319,17 @@ may_update_popup_mask(int type)
 	else if (popup_need_position_adjust(wp))
 	    popup_mask_refresh = TRUE;
 
-    // Force background windows to redraw rows under opacity popups.
-    // Opacity popups don't participate in popup_mask, so their area
-    // wouldn't normally be redrawn.  Without this, ScreenAttrs retains
-    // blended values from the previous cycle, causing blend accumulation.
-    // This must run every cycle, not just when popup_mask_refresh is set.
+    // Force background windows to redraw rows under opacity popups so that
+    // base_screenattrs gets fresh (unblended) values.  Without this, blended
+    // values accumulate in ScreenAttrs and make the popup progressively more
+    // opaque.  The sync output fix in term_set_sync_output() ensures this
+    // redundant drawing doesn't cause visible flickering.
     FOR_ALL_POPUPWINS(wp)
-	redraw_win_under_opacity_popup(wp);
+	if (!(wp->w_popup_flags & POPF_HIDDEN))
+	    redraw_win_under_opacity_popup(wp);
     FOR_ALL_POPUPWINS_IN_TAB(curtab, wp)
-	redraw_win_under_opacity_popup(wp);
+	if (!(wp->w_popup_flags & POPF_HIDDEN))
+	    redraw_win_under_opacity_popup(wp);
 
     if (!popup_mask_refresh)
 	return;
