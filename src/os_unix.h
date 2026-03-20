@@ -375,7 +375,7 @@ typedef struct dsc$descriptor   DESC;
 #endif
 
 // Special wildcards that need to be handled by the shell
-#define SPECIAL_WILDCHAR    "`'{"
+#define SPECIAL_WILDCHAR    "`"
 
 /*
  * Unix has plenty of memory, use large buffers

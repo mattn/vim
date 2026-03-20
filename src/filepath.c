@@ -3496,6 +3496,262 @@ expand_backtick(
     return cnt;
 }
 
+/*
+ * Find the matching '}' for a '{' at "p" (which points to the char after '{').
+ * Handles nested braces and backslash escaping.
+ * Returns pointer to the matching '}' or NULL if not found.
+ */
+    static char_u *
+find_matching_brace(char_u *p)
+{
+    int	depth = 1;
+
+    for ( ; *p != NUL; MB_PTR_ADV(p))
+    {
+	if (*p == '\\' && p[1] != NUL)
+	    ++p;
+	else if (*p == '{')
+	    ++depth;
+	else if (*p == '}')
+	{
+	    if (--depth == 0)
+		return p;
+	}
+    }
+    return NULL;
+}
+
+/*
+ * Expand brace expressions in a single pattern.
+ * E.g., "*.{c,h}" -> "*.c", "*.h"
+ * Handles nested braces: "{a,{b,c}}" -> "a", "b", "c"
+ * Multiple brace groups: "{a,b}.{c,d}" -> "a.c", "a.d", "b.c", "b.d"
+ *
+ * Results are added to growarray "ga".
+ * "depth" limits recursion.
+ * Returns OK or FAIL.
+ */
+    static int
+expand_one_brace(garray_T *ga, char_u *pat, int depth)
+{
+    char_u  *p;
+    char_u  *brace_start = NULL;
+    char_u  *brace_end;
+    int	    has_comma;
+
+    if (depth > 20)
+	return FAIL;
+
+    // Find the first unescaped '{' that has a matching '}' with a comma.
+    for (p = pat; *p != NUL; MB_PTR_ADV(p))
+    {
+	if (*p == '\\' && p[1] != NUL)
+	{
+	    ++p;
+	    continue;
+	}
+	if (*p == '{')
+	{
+	    brace_end = find_matching_brace(p + 1);
+	    if (brace_end != NULL)
+	    {
+		// Check if there's a comma at depth 1.
+		has_comma = FALSE;
+		{
+		    int	    d = 0;
+		    char_u  *q;
+
+		    for (q = p + 1; q < brace_end; MB_PTR_ADV(q))
+		    {
+			if (*q == '\\' && q[1] != NUL)
+			    ++q;
+			else if (*q == '{')
+			    ++d;
+			else if (*q == '}')
+			    --d;
+			else if (*q == ',' && d == 0)
+			{
+			    has_comma = TRUE;
+			    break;
+			}
+		    }
+		}
+		if (has_comma)
+		{
+		    brace_start = p;
+		    break;
+		}
+	    }
+	}
+    }
+
+    // No brace expansion needed, add the pattern as-is.
+    if (brace_start == NULL)
+    {
+	char_u	*copy = vim_strsave(pat);
+
+	if (copy == NULL)
+	    return FAIL;
+	if (ga_grow(ga, 1) == FAIL)
+	{
+	    vim_free(copy);
+	    return FAIL;
+	}
+	((char_u **)ga->ga_data)[ga->ga_len++] = copy;
+	return OK;
+    }
+
+    // Split at depth-0 commas between brace_start and brace_end.
+    {
+	size_t	prefix_len = (size_t)(brace_start - pat);
+	char_u	*suffix = brace_end + 1;
+	char_u	*alt_start = brace_start + 1;
+	char_u	*q;
+	int	d = 0;
+
+	for (q = alt_start; ; MB_PTR_ADV(q))
+	{
+	    if (*q == '\\' && q[1] != NUL)
+	    {
+		++q;
+		continue;
+	    }
+	    if (*q == '{')
+		++d;
+	    else if (*q == '}')
+	    {
+		if (d > 0)
+		    --d;
+		else
+		{
+		    // Last alternative: alt_start to q.
+		    size_t  alt_len = (size_t)(q - alt_start);
+		    size_t  suf_len = STRLEN(suffix);
+		    char_u  *newpat = alloc(prefix_len + alt_len + suf_len + 1);
+
+		    if (newpat == NULL)
+			return FAIL;
+		    mch_memmove(newpat, pat, prefix_len);
+		    mch_memmove(newpat + prefix_len, alt_start, alt_len);
+		    mch_memmove(newpat + prefix_len + alt_len, suffix,
+								suf_len + 1);
+		    // Recursively expand remaining brace groups.
+		    if (expand_one_brace(ga, newpat, depth + 1) == FAIL)
+		    {
+			vim_free(newpat);
+			return FAIL;
+		    }
+		    vim_free(newpat);
+		    break;
+		}
+	    }
+	    else if (*q == ',' && d == 0)
+	    {
+		// Found a comma at depth 0: alt_start to q is one alternative.
+		size_t	alt_len = (size_t)(q - alt_start);
+		size_t	suf_len = STRLEN(suffix);
+		char_u	*newpat = alloc(prefix_len + alt_len + suf_len + 1);
+
+		if (newpat == NULL)
+		    return FAIL;
+		mch_memmove(newpat, pat, prefix_len);
+		mch_memmove(newpat + prefix_len, alt_start, alt_len);
+		mch_memmove(newpat + prefix_len + alt_len, suffix,
+							    suf_len + 1);
+		if (expand_one_brace(ga, newpat, depth + 1) == FAIL)
+		{
+		    vim_free(newpat);
+		    return FAIL;
+		}
+		vim_free(newpat);
+		alt_start = q + 1;
+	    }
+	}
+    }
+
+    return OK;
+}
+
+/*
+ * Expand brace expressions in an array of patterns.
+ * E.g., ["*.{c,h}", "foo"] -> ["*.c", "*.h", "foo"]
+ *
+ * Returns OK and sets "num_res"/"res" to the expanded array (caller must
+ * free with FreeWild()).  Returns FAIL on error.
+ */
+    static int
+expand_braces(
+    int		num_pat,
+    char_u	**pat,
+    int		*num_res,
+    char_u	***res)
+{
+    int		i;
+    garray_T	ga;
+
+    ga_init2(&ga, sizeof(char_u *), num_pat * 2);
+
+    for (i = 0; i < num_pat; i++)
+    {
+	if (expand_one_brace(&ga, pat[i], 0) == FAIL)
+	{
+	    ga_clear_strings(&ga);
+	    return FAIL;
+	}
+    }
+
+    *num_res = ga.ga_len;
+    *res = (char_u **)ga.ga_data;
+    return OK;
+}
+
+/*
+ * Return TRUE if any pattern in "pat" contains an unescaped '{' with a
+ * matching '}' and a comma in between (i.e., a brace expansion pattern).
+ */
+    static int
+has_brace_pat(int num_pat, char_u **pat)
+{
+    int	    i;
+    char_u  *p;
+
+    for (i = 0; i < num_pat; i++)
+    {
+	for (p = pat[i]; *p != NUL; MB_PTR_ADV(p))
+	{
+	    if (*p == '\\' && p[1] != NUL)
+	    {
+		++p;
+		continue;
+	    }
+	    if (*p == '{')
+	    {
+		char_u *end = find_matching_brace(p + 1);
+
+		if (end != NULL)
+		{
+		    // Check for comma at depth 0.
+		    int	    d = 0;
+		    char_u  *q;
+
+		    for (q = p + 1; q < end; MB_PTR_ADV(q))
+		    {
+			if (*q == '\\' && q[1] != NUL)
+			    ++q;
+			else if (*q == '{')
+			    ++d;
+			else if (*q == '}')
+			    --d;
+			else if (*q == ',' && d == 0)
+			    return TRUE;
+		    }
+		}
+	    }
+	}
+    }
+    return FALSE;
+}
+
 #if defined(MSWIN)
 /*
  * File name expansion code for MS-DOS, Win16 and Win32.  It's here because
@@ -4037,11 +4293,8 @@ has_special_wildchar(char_u *p)
 	    ++p;
 	else if (vim_strchr((char_u *)SPECIAL_WILDCHAR, *p) != NULL)
 	{
-	    // A { must be followed by a matching }.
-	    if (*p == '{' && vim_strchr(p, '}') == NULL)
-		continue;
-	    // A quote and backtick must be followed by another one.
-	    if ((*p == '`' || *p == '\'') && vim_strchr(p, *p) == NULL)
+	    // A backtick must be followed by another one.
+	    if (*p == '`' && vim_strchr(p + 1, '`') == NULL)
 		continue;
 	    return TRUE;
 	}
@@ -4078,6 +4331,8 @@ gen_expand_wildcards(
     int			did_expand_in_path = FALSE;
     char_u		*path_option = *curbuf->b_p_path == NUL ?
 					p_path : curbuf->b_p_path;
+    char_u		**brace_pat = NULL;
+    int			brace_num = 0;
 
     /*
      * expand_env() is called to expand things like "~user".  If this fails,
@@ -4092,6 +4347,17 @@ gen_expand_wildcards(
 	return FAIL;
 #endif
 
+    // Expand brace patterns internally (e.g., "*.{c,h}" -> "*.c", "*.h")
+    // so they don't fall through to the shell.
+    if (has_brace_pat(num_pat, pat))
+    {
+	if (expand_braces(num_pat, pat, &brace_num, &brace_pat) == OK)
+	{
+	    pat = brace_pat;
+	    num_pat = brace_num;
+	}
+    }
+
 #ifdef SPECIAL_WILDCHAR
     /*
      * If there are any special wildcard characters which we cannot handle
@@ -4104,7 +4370,11 @@ gen_expand_wildcards(
 	if (has_special_wildchar(pat[i])
 		&& !(vim_backtick(pat[i]) && pat[i][1] == '=')
 	   )
-	    return mch_expand_wildcards(num_pat, pat, num_file, file, flags);
+	{
+	    i = mch_expand_wildcards(num_pat, pat, num_file, file, flags);
+	    FreeWild(brace_num, brace_pat);
+	    return i;
+	}
     }
 #endif
 
@@ -4149,6 +4419,7 @@ gen_expand_wildcards(
 		    i = mch_expand_wildcards(num_pat, pat, num_file, file,
 							 flags|EW_KEEPDOLLAR);
 		    recursive = FALSE;
+		    FreeWild(brace_num, brace_pat);
 		    return i;
 		}
 #endif
@@ -4212,6 +4483,7 @@ gen_expand_wildcards(
 						  : (char_u **)_("no matches");
 
     recursive = FALSE;
+    FreeWild(brace_num, brace_pat);
 
     return ((flags & EW_EMPTYOK) || ga.ga_data != NULL) ? retval : FAIL;
 }

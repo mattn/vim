@@ -111,12 +111,13 @@ func Test_expandcmd()
   call assert_equal("e foo bar baz", expandcmd("e $FOO"))
 
   if has('unix') && executable('bash')
-    " test for using the shell to expand a command argument.
-    " only bash supports the {..} syntax
+    " {1..4} is a bash sequence expression, not a Vim brace expansion
+    " (no comma), so it is kept as-is without calling the shell.
     set shell=bash
     let x = expandcmd('{1..4}')
     call assert_equal('{1..4}', x)
-    call assert_fails("let x = expandcmd('{1..4}', #{errmsg: v:true})", 'E77:')
+    let x = expandcmd('{1..4}', #{errmsg: v:true})
+    call assert_equal('{1..4}', x)
     let x = expandcmd('{1..4}', #{error: v:true})
     call assert_equal('{1..4}', x)
     set shell&
