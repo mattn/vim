@@ -254,6 +254,9 @@ typedef enum {
 
 #define COCU_ALL	"nvic"		// flags for 'concealcursor'
 
+// Keep in sync with p_ccopt_values in optionstr.c
+#define CCOPT_CURSOR	0x001	// smooth cursor movement over concealed text
+
 // characters for p_shm option:
 #define SHM_RO		'r'		// readonly
 #define SHM_MOD		'm'		// modified
@@ -1328,6 +1331,7 @@ enum
 #ifdef FEAT_CONCEAL
     , WV_COCU
     , WV_COLE
+    , WV_CCOPT
 #endif
 #ifdef FEAT_TERMINAL
     , WV_TWK

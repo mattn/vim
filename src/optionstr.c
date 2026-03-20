@@ -1971,6 +1971,34 @@ expand_set_concealcursor(optexpand_T *args, int *numMatches, char_u ***matches)
 {
     return expand_set_opt_listflag(args, (char_u*)COCU_ALL, numMatches, matches);
 }
+
+static char *(p_ccopt_values[]) = {"cursor", NULL};
+
+/*
+ * The 'concealopt' option is changed.
+ */
+    char *
+did_set_concealopt(optset_T *args)
+{
+    char_u	**varp = (char_u **)args->os_varp;
+    unsigned	*flagsp = &curwin->w_p_ccopt_flags;
+
+    if (opt_strings_flags(*varp, p_ccopt_values, flagsp, TRUE) != OK)
+	return e_invalid_argument;
+
+    return NULL;
+}
+
+    int
+expand_set_concealopt(optexpand_T *args, int *numMatches, char_u ***matches)
+{
+    return expand_set_opt_string(
+	    args,
+	    p_ccopt_values,
+	    ARRAY_LENGTH(p_ccopt_values) - 1,
+	    numMatches,
+	    matches);
+}
 #endif
 
 /*

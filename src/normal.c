@@ -3908,6 +3908,35 @@ nv_right(cmdarg_T *cap)
 		    ++curwin->w_cursor.col;
 	    }
 	}
+#ifdef FEAT_CONCEAL
+	// When 'concealopt' has "cursor", skip remaining characters in the
+	// same concealed region so that "l" moves one screen column.
+	if (curwin->w_p_cole > 0
+		&& (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+		&& conceal_cursor_line(curwin))
+	{
+	    int	    prev_seqnr;
+	    int	    cur_seqnr;
+	    int	    cur_flags;
+
+	    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
+				     curwin->w_cursor.col, FALSE, NULL, FALSE);
+	    cur_flags = get_syntax_info(&prev_seqnr);
+	    if ((cur_flags & HL_CONCEAL) && prev_seqnr > 0)
+	    {
+		while (*ml_get_cursor() != NUL)
+		{
+		    if (oneright() == FAIL)
+			break;
+		    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
+				     curwin->w_cursor.col, FALSE, NULL, FALSE);
+		    (void)get_syntax_info(&cur_seqnr);
+		    if (cur_seqnr != prev_seqnr)
+			break;
+		}
+	    }
+	}
+#endif
     }
 #ifdef FEAT_FOLDING
     if (n != cap->count1 && (fdo_flags & FDO_HOR) && KeyTyped
@@ -3983,6 +4012,43 @@ nv_left(cmdarg_T *cap)
 		beep_flush();
 	    break;
 	}
+#ifdef FEAT_CONCEAL
+	// When 'concealopt' has "cursor", skip to the start of the concealed
+	// region so that "h" moves one screen column.
+	if (curwin->w_p_cole > 0
+		&& (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+		&& conceal_cursor_line(curwin))
+	{
+	    int	    prev_seqnr;
+	    int	    cur_seqnr;
+	    int	    cur_flags;
+
+	    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
+				     curwin->w_cursor.col, FALSE, NULL, FALSE);
+	    cur_flags = get_syntax_info(&prev_seqnr);
+	    if ((cur_flags & HL_CONCEAL) && prev_seqnr > 0)
+	    {
+		while (curwin->w_cursor.col > 0)
+		{
+		    if (oneleft() == FAIL)
+			break;
+		    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
+				     curwin->w_cursor.col, FALSE, NULL, FALSE);
+		    cur_flags = get_syntax_info(&cur_seqnr);
+		    if (cur_seqnr != prev_seqnr)
+		    {
+			if (curwin->w_p_cole < 3)
+			    // conceallevel 1-2: conceal char is shown, so
+			    // stop at the first char of the conceal region.
+			    (void)oneright();
+			// conceallevel 3: fully hidden, cursor is already
+			// at the right position (before the conceal region).
+			break;
+		    }
+		}
+	    }
+	}
+#endif
     }
 #ifdef FEAT_FOLDING
     if (n != cap->count1 && (fdo_flags & FDO_HOR) && KeyTyped

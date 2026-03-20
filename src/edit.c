@@ -2944,10 +2944,23 @@ cursor_up(
     if (n > 0 && (lnum <= 1
 		       || (n >= lnum && vim_strchr(p_cpo, CPO_MINUS) != NULL)))
 	return FAIL;
+
+#ifdef FEAT_CONCEAL
+    colnr_T	save_curswant = curwin->w_curswant;
+    linenr_T	save_lnum = curwin->w_cursor.lnum;
+#endif
+
     cursor_up_inner(curwin, n);
 
     // try to advance to the column we want to be at
-    coladvance(curwin->w_curswant);
+#ifdef FEAT_CONCEAL
+    if (curwin->w_p_cole > 0
+	    && (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+	    && conceal_cursor_line(curwin))
+	coladvance(conceal_curswant(curwin, save_lnum, save_curswant));
+    else
+#endif
+	coladvance(curwin->w_curswant);
 
     if (upd_topline)
 	update_topline();	// make sure curwin->w_topline is valid
@@ -3013,10 +3026,23 @@ cursor_down(
 		|| (lnum + n > line_count
 				     && vim_strchr(p_cpo, CPO_MINUS) != NULL)))
 	return FAIL;
+
+#ifdef FEAT_CONCEAL
+    colnr_T	save_curswant = curwin->w_curswant;
+    linenr_T	save_lnum = curwin->w_cursor.lnum;
+#endif
+
     cursor_down_inner(curwin, n);
 
     // try to advance to the column we want to be at
-    coladvance(curwin->w_curswant);
+#ifdef FEAT_CONCEAL
+    if (curwin->w_p_cole > 0
+	    && (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+	    && conceal_cursor_line(curwin))
+	coladvance(conceal_curswant(curwin, save_lnum, save_curswant));
+    else
+#endif
+	coladvance(curwin->w_curswant);
 
     if (upd_topline)
 	update_topline();	// make sure curwin->w_topline is valid

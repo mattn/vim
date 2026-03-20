@@ -108,6 +108,145 @@ conceal_check_cursor_line(int was_concealed)
     if (!was_concealed)
 	curwin->w_wcol = wcol;
 }
+
+/*
+ * Calculate the conceal offset for line "lnum" up to buffer column "col" in
+ * window "wp".  This is the total number of virtual columns that are hidden
+ * due to concealed text.  Only counts when conceal is active on the line.
+ * Returns 0 if no concealing or col is 0.
+ */
+    int
+conceal_col_offset(win_T *wp, linenr_T lnum, int col)
+{
+    char_u	*line;
+    int		offset = 0;
+    int		prev_seqnr = 0;
+    int		seqnr;
+    int		flags;
+    int		i;
+    int		len;
+    int		c_len;
+
+    if (wp->w_p_cole <= 0)
+	return 0;
+
+    line = ml_get_buf(wp->w_buffer, lnum, FALSE);
+    len = ml_get_buf_len(wp->w_buffer, lnum);
+
+    for (i = 0; i < col && i < len; )
+    {
+	(void)syn_get_id(wp, lnum, (colnr_T)i, FALSE, NULL, FALSE);
+	flags = get_syntax_info(&seqnr);
+
+	if (has_mbyte)
+	    c_len = (*mb_ptr2len)(line + i);
+	else
+	    c_len = 1;
+
+	if ((flags & HL_CONCEAL) && wp->w_p_cole != 3)
+	{
+	    if (seqnr != prev_seqnr)
+	    {
+		// First char of a new concealed region: this one is shown
+		// as the conceal character, so don't add to offset.
+		// But the remaining chars in this region will be hidden.
+		prev_seqnr = seqnr;
+	    }
+	    else
+	    {
+		// Subsequent char in same concealed region: hidden.
+		offset += ptr2cells(line + i);
+	    }
+	}
+	else
+	    prev_seqnr = 0;
+
+	i += c_len;
+    }
+
+    return offset;
+}
+
+/*
+ * Compute the buffer virtual column to advance to on the current line, given
+ * that the cursor was at "curswant" on line "from_lnum".  Adjusts for the
+ * difference in concealed characters between the two lines so that the cursor
+ * stays at the same screen column.
+ */
+    colnr_T
+conceal_curswant(win_T *wp, linenr_T from_lnum, colnr_T curswant)
+{
+    int	    from_offset;
+    int	    to_offset;
+    int	    screen_col;
+    char_u  *line;
+    int	    len;
+    int	    i;
+    int	    vcol;
+    int	    prev_seqnr;
+    int	    seqnr;
+    int	    flags;
+    int	    c_len;
+
+    // Get the conceal offset at curswant on the source line.
+    from_offset = conceal_col_offset(wp, from_lnum, (int)curswant + 1);
+
+    // The screen column we want to reach.
+    screen_col = (int)curswant - from_offset;
+    if (screen_col < 0)
+	screen_col = 0;
+
+    // Walk the destination line to find the buffer column that corresponds
+    // to the desired screen column.
+    line = ml_get_buf(wp->w_buffer, wp->w_cursor.lnum, FALSE);
+    len = ml_get_buf_len(wp->w_buffer, wp->w_cursor.lnum);
+
+    vcol = 0;
+    to_offset = 0;
+    prev_seqnr = 0;
+
+    for (i = 0; i < len; )
+    {
+	(void)syn_get_id(wp, wp->w_cursor.lnum, (colnr_T)i, FALSE, NULL, FALSE);
+	flags = get_syntax_info(&seqnr);
+
+	if (has_mbyte)
+	    c_len = (*mb_ptr2len)(line + i);
+	else
+	    c_len = 1;
+
+	int cell_width = ptr2cells(line + i);
+
+	if ((flags & HL_CONCEAL) && wp->w_p_cole != 3)
+	{
+	    if (seqnr != prev_seqnr)
+	    {
+		// First char of a new concealed region: occupies 1 screen col.
+		prev_seqnr = seqnr;
+		if (vcol - to_offset >= screen_col)
+		    return (colnr_T)vcol;
+		vcol += cell_width;
+	    }
+	    else
+	    {
+		// Hidden char: add to offset, vcol advances but screen col doesn't.
+		to_offset += cell_width;
+		vcol += cell_width;
+	    }
+	}
+	else
+	{
+	    prev_seqnr = 0;
+	    if (vcol - to_offset >= screen_col)
+		return (colnr_T)vcol;
+	    vcol += cell_width;
+	}
+
+	i += c_len;
+    }
+
+    return (colnr_T)vcol;
+}
 #endif
 
 /*

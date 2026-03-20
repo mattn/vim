@@ -52,6 +52,8 @@ char *did_set_completeslash(optset_T *args);
 int expand_set_completeslash(optexpand_T *args, int *numMatches, char_u ***matches);
 char *did_set_concealcursor(optset_T *args);
 int expand_set_concealcursor(optexpand_T *args, int *numMatches, char_u ***matches);
+char *did_set_concealopt(optset_T *args);
+int expand_set_concealopt(optexpand_T *args, int *numMatches, char_u ***matches);
 char *did_set_cpoptions(optset_T *args);
 int expand_set_cpoptions(optexpand_T *args, int *numMatches, char_u ***matches);
 char *did_set_cryptkey(optset_T *args);

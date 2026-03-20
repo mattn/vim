@@ -7205,6 +7205,7 @@ get_varp(struct vimoption *p)
 #ifdef FEAT_CONCEAL
 	case PV_COCU:   return (char_u *)&(curwin->w_p_cocu);
 	case PV_COLE:   return (char_u *)&(curwin->w_p_cole);
+	case PV_CCOPT:  return (char_u *)&(curwin->w_p_ccopt);
 #endif
 	case PV_WHL:	return (char_u *)&(curwin->w_p_whl);
 
@@ -7493,6 +7494,8 @@ copy_winopt(winopt_T *from, winopt_T *to)
 #ifdef FEAT_CONCEAL
     to->wo_cocu = copy_option_val(from->wo_cocu);
     to->wo_cole = from->wo_cole;
+    to->wo_ccopt = copy_option_val(from->wo_ccopt);
+    to->wo_ccopt_flags = from->wo_ccopt_flags;
 #endif
 #ifdef FEAT_TERMINAL
     to->wo_twk = copy_option_val(from->wo_twk);
@@ -7588,6 +7591,7 @@ check_winopt(winopt_T *wop UNUSED)
 #endif
 #ifdef FEAT_CONCEAL
     check_string_option(&wop->wo_cocu);
+    check_string_option(&wop->wo_ccopt);
 #endif
 #ifdef FEAT_TERMINAL
     check_string_option(&wop->wo_twk);
@@ -7643,6 +7647,7 @@ clear_winopt(winopt_T *wop UNUSED)
 #endif
 #ifdef FEAT_CONCEAL
     clear_string_option(&wop->wo_cocu);
+    clear_string_option(&wop->wo_ccopt);
 #endif
 #ifdef FEAT_TERMINAL
     clear_string_option(&wop->wo_twk);

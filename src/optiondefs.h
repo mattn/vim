@@ -236,6 +236,7 @@
 #ifdef FEAT_CONCEAL
 # define PV_COCU	OPT_WIN(WV_COCU)
 # define PV_COLE	OPT_WIN(WV_COLE)
+# define PV_CCOPT	OPT_WIN(WV_CCOPT)
 #endif
 #ifdef FEAT_TERMINAL
 # define PV_TWK		OPT_WIN(WV_TWK)
@@ -744,6 +745,15 @@ static struct vimoption options[] =
 			    (char_u *)NULL, PV_NONE, NULL, NULL,
 #endif
 			    {(char_u *)0L, (char_u *)0L}
+			    SCTX_INIT},
+    {"concealopt",  "ccopt", P_STRING|P_ALLOCED|P_RWIN|P_VI_DEF|P_ONECOMMA|P_NODUP,
+#ifdef FEAT_CONCEAL
+			    (char_u *)VAR_WIN, PV_CCOPT, did_set_concealopt, expand_set_concealopt,
+			    {(char_u *)"", (char_u *)NULL}
+#else
+			    (char_u *)NULL, PV_NONE, NULL, NULL,
+			    {(char_u *)NULL, (char_u *)0L}
+#endif
 			    SCTX_INIT},
     {"confirm",     "cf",   P_BOOL|P_VI_DEF,
 #if defined(FEAT_GUI_DIALOG) || defined(FEAT_CON_DIALOG)

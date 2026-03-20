@@ -336,6 +336,10 @@ typedef struct
 # define w_p_cocu w_onebuf_opt.wo_cocu
     long	wo_cole;		// 'conceallevel'
 # define w_p_cole w_onebuf_opt.wo_cole
+    char_u	*wo_ccopt;		// 'concealopt'
+# define w_p_ccopt w_onebuf_opt.wo_ccopt
+    unsigned	wo_ccopt_flags;		// flags from 'concealopt'
+# define w_p_ccopt_flags w_onebuf_opt.wo_ccopt_flags
 #endif
     int		wo_crb;
 #define w_p_crb w_onebuf_opt.wo_crb	// 'cursorbind'
