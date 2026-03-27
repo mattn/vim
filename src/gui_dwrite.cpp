@@ -1095,10 +1095,41 @@ DWriteContext::DrawText(const WCHAR *text, int len,
 
 	if (mFontFeatureCount > 0)
 	{
+	    // Default OpenType features that DirectWrite normally enables.
+	    // SetTypography() overrides all defaults, so we must
+	    // re-add them here explicitly.
+	    static const DWRITE_FONT_FEATURE defaultFeatures[] = {
+		{ DWRITE_FONT_FEATURE_TAG_CONTEXTUAL_ALTERNATES, 1 },
+		{ DWRITE_FONT_FEATURE_TAG_STANDARD_LIGATURES, 1 },
+		{ DWRITE_FONT_FEATURE_TAG_CONTEXTUAL_LIGATURES, 1 },
+		{ DWRITE_FONT_FEATURE_TAG_REQUIRED_LIGATURES, 1 },
+		{ DWRITE_FONT_FEATURE_TAG_KERNING, 1 },
+	    };
+	    static const int numDefaults = sizeof(defaultFeatures)
+		/ sizeof(defaultFeatures[0]);
+
 	    IDWriteTypography *typography = NULL;
 	    hr = mDWriteFactory->CreateTypography(&typography);
 	    if (SUCCEEDED(hr))
 	    {
+		// Add default features, skipping any that the user
+		// has explicitly specified (either + or -).
+		for (int d = 0; d < numDefaults; ++d)
+		{
+		    int overridden = 0;
+		    for (int u = 0; u < mFontFeatureCount; ++u)
+		    {
+			if ((DWRITE_FONT_FEATURE_TAG)mFontFeatures[u].tag
+				== defaultFeatures[d].nameTag)
+			{
+			    overridden = 1;
+			    break;
+			}
+		    }
+		    if (!overridden)
+			typography->AddFontFeature(defaultFeatures[d]);
+		}
+		// Add user-specified features.
 		for (int i = 0; i < mFontFeatureCount; ++i)
 		{
 		    DWRITE_FONT_FEATURE ff = {

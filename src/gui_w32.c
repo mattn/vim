@@ -213,26 +213,29 @@ gui_mch_set_rendering_options(char_u *s)
 	}
 	else if (STRCMP(name, "feature") == 0)
 	{
-	    // OpenType font feature tag (e.g., "calt", "ss01", "liga").
-	    if (STRLEN(value) != 4)
+	    // OpenType font feature tag with optional +/- prefix.
+	    //   feature:ss19  or  feature:+ss19  -> enable
+	    //   feature:-calt                    -> disable
+	    char_u  *tag = value;
+	    unsigned int param = 1;
+
+	    if (*tag == '+')
+		tag++;
+	    else if (*tag == '-')
+	    {
+		param = 0;
+		tag++;
+	    }
+	    if (STRLEN(tag) != 4)
 		return FAIL;
 	    if (dx_feature_count >= DWRITE_MAX_FONT_FEATURES)
 		return FAIL;
 	    dx_features[dx_feature_count].tag =
-		((unsigned int)value[0])
-		| ((unsigned int)value[1] << 8)
-		| ((unsigned int)value[2] << 16)
-		| ((unsigned int)value[3] << 24);
-	    // Check for optional parameter value after the tag.
-	    if (q != NULL && *q != NUL)
-	    {
-		char_u param[128];
-		copy_option_part(&q, param, sizeof(param), ":");
-		dx_features[dx_feature_count].parameter =
-		    (unsigned int)atoi((char *)param);
-	    }
-	    else
-		dx_features[dx_feature_count].parameter = 1;
+		((unsigned int)tag[0])
+		| ((unsigned int)tag[1] << 8)
+		| ((unsigned int)tag[2] << 16)
+		| ((unsigned int)tag[3] << 24);
+	    dx_features[dx_feature_count].parameter = param;
 	    dx_feature_count++;
 	}
 	else
