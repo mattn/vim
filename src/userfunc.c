@@ -1265,6 +1265,12 @@ get_function_body(
 			is_block = checkforcmd_noparen(&s, "autocmd", 2)
 				      || checkforcmd_noparen(&s, "command", 3);
 		    }
+		    // Inside an inline block (e.g. lambda), a line ending
+		    // with "{" could be a dictionary literal or other
+		    // compound expression.  Track the nesting to avoid
+		    // mistaking the closing "}" for the end of the block.
+		    if (!is_block && nesting_inline[nesting])
+			is_block = TRUE;
 
 		    if (is_block)
 		    {

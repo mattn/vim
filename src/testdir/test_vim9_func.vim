@@ -3397,6 +3397,50 @@ def Test_nested_inline_lambda()
   v9.CheckScriptSuccess(lines)
 enddef
 
+def Test_lambda_with_multiline_dict()
+  var lines =<< trim END
+      vim9script
+      var F = () => {
+        var D = {
+          hoge: "hoge"
+        }
+        return D
+      }
+      assert_equal({hoge: "hoge"}, F())
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      var F = () => {
+        var D = {
+          hoge: "hoge",
+          fuga: "fuga"
+        }
+        return D
+      }
+      assert_equal({hoge: "hoge", fuga: "fuga"}, F())
+  END
+  v9.CheckScriptSuccess(lines)
+
+  lines =<< trim END
+      vim9script
+      def Func(): dict<any>
+        var F = () => {
+            var D = {
+              inner: {
+                key: "value"
+              }
+            }
+            return D
+          }
+        return F()
+      enddef
+      assert_equal({inner: {key: "value"}}, Func())
+  END
+  v9.CheckScriptSuccess(lines)
+enddef
+
 def Shadowed(): list<number>
   var FuncList: list<func: number> = [() => 42]
   return FuncList->mapnew((_, Shadowed) => Shadowed())
