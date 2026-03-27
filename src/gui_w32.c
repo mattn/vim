@@ -145,6 +145,8 @@ gui_mch_set_rendering_options(char_u *s)
     int	    dx_geom = 0;
     int	    dx_renmode = 0;
     int	    dx_taamode = 0;
+    DWriteFontFeature dx_features[DWRITE_MAX_FONT_FEATURES];
+    int	    dx_feature_count = 0;
 
     // parse string as rendering options.
     for (p = s; p != NULL && *p != NUL; )
@@ -209,6 +211,30 @@ gui_mch_set_rendering_options(char_u *s)
 	{
 	    // Deprecated.  Simply ignore it.
 	}
+	else if (STRCMP(name, "feature") == 0)
+	{
+	    // OpenType font feature tag (e.g., "calt", "ss01", "liga").
+	    if (STRLEN(value) != 4)
+		return FAIL;
+	    if (dx_feature_count >= DWRITE_MAX_FONT_FEATURES)
+		return FAIL;
+	    dx_features[dx_feature_count].tag =
+		((unsigned int)value[0])
+		| ((unsigned int)value[1] << 8)
+		| ((unsigned int)value[2] << 16)
+		| ((unsigned int)value[3] << 24);
+	    // Check for optional parameter value after the tag.
+	    if (q != NULL && *q != NUL)
+	    {
+		char_u param[128];
+		copy_option_part(&q, param, sizeof(param), ":");
+		dx_features[dx_feature_count].parameter =
+		    (unsigned int)atoi((char *)param);
+	    }
+	    else
+		dx_features[dx_feature_count].parameter = 1;
+	    dx_feature_count++;
+	}
 	else
 	    return FAIL;
     }
@@ -241,6 +267,8 @@ gui_mch_set_rendering_options(char_u *s)
 	    DWriteContext_SetRenderingParams(s_dwc, &param);
 	}
     }
+    if (dx_enable)
+	DWriteContext_SetFontFeatures(s_dwc, dx_features, dx_feature_count);
     s_directx_enabled = dx_enable;
     gui.directx_enabled = IS_ENABLE_DIRECTX();
 
