@@ -3211,7 +3211,7 @@ get_logfont(
 		}
 		break;
 	    case L'f':
-		// Font features (e.g., "fss19=1&calt=0").
+		// Font features (e.g., "fss19=1").
 		// Parsed separately by gui_mch_init_font(); skip here.
 		while (*p && *p != L':')
 		    p++;

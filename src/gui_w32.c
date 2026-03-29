@@ -3956,7 +3956,7 @@ gui_mch_init_font(char_u *font_name, int fontset UNUSED)
 	return FAIL;
 
 #if defined(FEAT_DIRECTX)
-    // Parse font features from guifont (e.g., ":fss19=1&calt=0&liga=1").
+    // Parse font features from guifont (e.g., ":fss19=1:fcalt=0:fliga=1").
     {
 	DWriteFontFeature features[DWRITE_MAX_FONT_FEATURES];
 	int		    feat_count = 0;
@@ -3964,50 +3964,44 @@ gui_mch_init_font(char_u *font_name, int fontset UNUSED)
 
 	if (font_name != NULL)
 	{
-	    // Find ":f" option in font_name.
+	    // Find each ":f" option in font_name.
 	    for (fp = font_name; *fp != NUL; fp++)
 	    {
 		if (*fp == ':' && *(fp + 1) == 'f')
 		{
+		    char_u tag[5];
+		    int    ti = 0;
+		    unsigned int param = 1;
+
 		    fp += 2;  // skip ":f"
-		    // Parse "tag=val&tag=val..." entries.
-		    while (*fp != NUL && *fp != ':')
+		    while (*fp != NUL && *fp != '=' && *fp != ':'
+			    && ti < 4)
+			tag[ti++] = *fp++;
+		    tag[ti] = NUL;
+
+		    if (ti != 4)
+			continue;  // invalid tag length
+
+		    if (*fp == '=')
 		    {
-			char_u tag[5];
-			int    ti = 0;
-			unsigned int param = 1;
-
-			while (*fp != NUL && *fp != '=' && *fp != '&'
-				&& *fp != ':' && ti < 4)
-			    tag[ti++] = *fp++;
-			tag[ti] = NUL;
-
-			if (ti != 4)
-			    break;  // invalid tag length
-
-			if (*fp == '=')
-			{
-			    fp++;
-			    param = (unsigned int)atoi((char *)fp);
-			    while (*fp >= '0' && *fp <= '9')
-				fp++;
-			}
-
-			if (feat_count < DWRITE_MAX_FONT_FEATURES)
-			{
-			    features[feat_count].tag =
-				((unsigned int)tag[0])
-				| ((unsigned int)tag[1] << 8)
-				| ((unsigned int)tag[2] << 16)
-				| ((unsigned int)tag[3] << 24);
-			    features[feat_count].parameter = param;
-			    feat_count++;
-			}
-
-			if (*fp == '&')
+			fp++;
+			param = (unsigned int)atoi((char *)fp);
+			while (*fp >= '0' && *fp <= '9')
 			    fp++;
 		    }
-		    break;
+
+		    if (feat_count < DWRITE_MAX_FONT_FEATURES)
+		    {
+			features[feat_count].tag =
+			    ((unsigned int)tag[0])
+			    | ((unsigned int)tag[1] << 8)
+			    | ((unsigned int)tag[2] << 16)
+			    | ((unsigned int)tag[3] << 24);
+			features[feat_count].parameter = param;
+			feat_count++;
+		    }
+
+		    fp--;  // adjust for loop increment
 		}
 	    }
 	}
