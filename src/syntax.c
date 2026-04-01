@@ -110,6 +110,8 @@ typedef struct syn_cluster_S
     char_u	    *scl_name;	    // syntax cluster name
     char_u	    *scl_name_u;    // uppercase of scl_name
     short	    *scl_list;	    // IDs in this syntax cluster
+    char_u	    *scl_id_bitmap; // cached bitmap for simple cluster lookups
+    char	    scl_bitmap_mode; // 0: unknown, 1: bitmap ready, 2: fallback
 } syn_cluster_T;
 
 /*
@@ -136,6 +138,14 @@ typedef struct syn_cluster_S
 
 #define MAX_SYN_INC_TAG	999	    // maximum before the above overflow
 #define MAX_CLUSTER_ID  (32767 - SYNID_CLUSTER)
+
+#define SYN_BITMAP_BYTES ((MAX_HL_ID + 7) / 8)
+#define SYN_BM_SET(bm, id)  ((bm)[((id) - 1) / 8] |= (1 << (((id) - 1) % 8)))
+#define SYN_BM_TEST(bm, id) ((bm)[((id) - 1) / 8] & (1 << (((id) - 1) % 8)))
+
+#define SYN_CLUSTER_BM_UNKNOWN 0
+#define SYN_CLUSTER_BM_READY   1
+#define SYN_CLUSTER_BM_NONE    2
 
 /*
  * Annoying Hack(TM):  ":syn include" needs this pointer to pass to
@@ -341,6 +351,9 @@ static void clear_keywtab(hashtab_T *ht);
 static int syn_scl_namen2id(char_u *linep, int len);
 static int syn_check_cluster(char_u *pp, int len);
 static int syn_add_cluster(char_u *name);
+static void invalidate_cluster_bitmaps(synblock_T *block);
+static int cluster_build_bitmap(int clust_idx, char_u *bitmap, int depth);
+static char_u *cluster_get_bitmap(int clust_idx);
 static void init_syn_patterns(void);
 static char_u *get_syn_pattern(char_u *arg, synpat_T *ci);
 static int get_id_list(char_u **arg, int keylen, short **list, int skip);
@@ -3621,6 +3634,7 @@ syn_clear_cluster(synblock_T *block, int i)
     vim_free(SYN_CLSTR(block)[i].scl_name);
     vim_free(SYN_CLSTR(block)[i].scl_name_u);
     vim_free(SYN_CLSTR(block)[i].scl_list);
+    vim_free(SYN_CLSTR(block)[i].scl_id_bitmap);
 }
 
 /*
@@ -3687,6 +3701,7 @@ syn_cmd_clear(exarg_T *eap, int syncing)
 		    short scl_id = id - SYNID_CLUSTER;
 
 		    VIM_CLEAR(SYN_CLSTR(curwin->w_s)[scl_id].scl_list);
+		    invalidate_cluster_bitmaps(curwin->w_s);
 		}
 	    }
 	    else
@@ -4694,6 +4709,7 @@ syn_incl_toplevel(int id, int *flagsp)
 	    grp_list[1] = 0;
 	    syn_combine_list(&SYN_CLSTR(curwin->w_s)[tlg_id].scl_list,
 						       &grp_list, CLUSTER_ADD);
+	    invalidate_cluster_bitmaps(curwin->w_s);
 	}
     }
 }
@@ -5522,6 +5538,8 @@ syn_add_cluster(char_u *name)
     SYN_CLSTR(curwin->w_s)[len].scl_name = name;
     SYN_CLSTR(curwin->w_s)[len].scl_name_u = vim_strsave_up(name);
     SYN_CLSTR(curwin->w_s)[len].scl_list = NULL;
+    SYN_CLSTR(curwin->w_s)[len].scl_id_bitmap = NULL;
+    SYN_CLSTR(curwin->w_s)[len].scl_bitmap_mode = SYN_CLUSTER_BM_UNKNOWN;
     ++curwin->w_s->b_syn_clusters.ga_len;
 
     if (STRICMP(name, "Spell") == 0)
@@ -5530,6 +5548,22 @@ syn_add_cluster(char_u *name)
 	curwin->w_s->b_nospell_cluster_id = len + SYNID_CLUSTER;
 
     return len + SYNID_CLUSTER;
+}
+
+/*
+ * Invalidate all cached cluster bitmaps.  Clusters can reference each other,
+ * thus any change may affect any cached expansion.
+ */
+    static void
+invalidate_cluster_bitmaps(synblock_T *block)
+{
+    int i;
+
+    for (i = 0; i < block->b_syn_clusters.ga_len; ++i)
+    {
+	VIM_CLEAR(SYN_CLSTR(block)[i].scl_id_bitmap);
+	SYN_CLSTR(block)[i].scl_bitmap_mode = SYN_CLUSTER_BM_UNKNOWN;
+    }
 }
 
 /*
@@ -5591,8 +5625,11 @@ syn_cmd_cluster(exarg_T *eap, int syncing UNUSED)
 		break;
 	    }
 	    if (scl_id >= 0)
+	    {
 		syn_combine_list(&SYN_CLSTR(curwin->w_s)[scl_id].scl_list,
 			     &clstr_list, list_op);
+		invalidate_cluster_bitmaps(curwin->w_s);
+	    }
 	    else
 		vim_free(clstr_list);
 	    got_clstr = TRUE;
@@ -6111,6 +6148,73 @@ copy_id_list(short *list)
 }
 
 /*
+ * Build a flattened bitmap for a cluster.
+ * Returns TRUE when the cluster only contains direct IDs and/or other simple
+ * clusters.  If special markers are present we fall back to the recursive path
+ * to preserve semantics.
+ */
+    static int
+cluster_build_bitmap(int clust_idx, char_u *bitmap, int depth)
+{
+    syn_cluster_T	*scp;
+    short		*list;
+    short		item;
+
+    if (depth > 30)
+	return FALSE;
+    scp = &SYN_CLSTR(syn_block)[clust_idx];
+    list = scp->scl_list;
+    if (list == NULL)
+	return TRUE;
+
+    item = *list;
+    if (item >= SYNID_ALLBUT && item < SYNID_CLUSTER)
+	return FALSE;
+
+    while ((item = *list++) != 0)
+    {
+	if (item >= SYNID_CLUSTER)
+	{
+	    if (!cluster_build_bitmap(item - SYNID_CLUSTER, bitmap, depth + 1))
+		return FALSE;
+	}
+	else if (item > 0 && item <= MAX_HL_ID)
+	    SYN_BM_SET(bitmap, item);
+    }
+    return TRUE;
+}
+
+/*
+ * Get the cached bitmap for a simple cluster, building it on demand.
+ * Returns NULL when the cluster requires the recursive path.
+ */
+    static char_u *
+cluster_get_bitmap(int clust_idx)
+{
+    syn_cluster_T	*scp = &SYN_CLSTR(syn_block)[clust_idx];
+
+    if (scp->scl_bitmap_mode == SYN_CLUSTER_BM_READY)
+	return scp->scl_id_bitmap;
+    if (scp->scl_bitmap_mode == SYN_CLUSTER_BM_NONE)
+	return NULL;
+
+    scp->scl_id_bitmap = alloc_clear(SYN_BITMAP_BYTES);
+    if (scp->scl_id_bitmap == NULL)
+    {
+	scp->scl_bitmap_mode = SYN_CLUSTER_BM_NONE;
+	return NULL;
+    }
+    if (!cluster_build_bitmap(clust_idx, scp->scl_id_bitmap, 0))
+    {
+	VIM_CLEAR(scp->scl_id_bitmap);
+	scp->scl_bitmap_mode = SYN_CLUSTER_BM_NONE;
+	return NULL;
+    }
+    scp->scl_bitmap_mode = SYN_CLUSTER_BM_READY;
+    return scp->scl_id_bitmap;
+}
+
+/*
  * Check if syntax group "ssp" is in the ID list "list" of "cur_si".
  * "cur_si" can be NULL if not checking the "containedin" list.
  * Used to check if a syntax item is in the "contains" or "nextgroup" list of
@@ -6206,16 +6310,27 @@ in_id_list(
 	    return retval;
 	if (item >= SYNID_CLUSTER)
 	{
-	    scl_list = SYN_CLSTR(syn_block)[item - SYNID_CLUSTER].scl_list;
-	    // restrict recursiveness to 30 to avoid an endless loop for a
-	    // cluster that includes itself (indirectly)
-	    if (scl_list != NULL && depth < 30)
+	    char_u	*bitmap;
+
+	    bitmap = cluster_get_bitmap(item - SYNID_CLUSTER);
+	    if (bitmap != NULL)
 	    {
-		++depth;
-		r = in_id_list(NULL, scl_list, ssp, flags);
-		--depth;
-		if (r)
+		if (id > 0 && id <= MAX_HL_ID && SYN_BM_TEST(bitmap, id))
 		    return retval;
+	    }
+	    else
+	    {
+		scl_list = SYN_CLSTR(syn_block)[item - SYNID_CLUSTER].scl_list;
+		// restrict recursiveness to 30 to avoid an endless loop for a
+		// cluster that includes itself (indirectly)
+		if (scl_list != NULL && depth < 30)
+		{
+		    ++depth;
+		    r = in_id_list(NULL, scl_list, ssp, flags);
+		    --depth;
+		    if (r)
+			return retval;
+		}
 	    }
 	}
 	item = *++list;
