@@ -3850,6 +3850,27 @@ nv_right(cmdarg_T *cap)
 
     for (n = cap->count1; n > 0; --n)
     {
+#ifdef FEAT_CONCEAL
+	// Remember the syntax sequence number at the cursor BEFORE moving so
+	// that the conceal "cursor" handling below can decide whether the move
+	// stayed inside the same conceal region (skip the rest) or crossed
+	// into a new region/non-conceal char (do not skip).
+	int	prev_seqnr_before = 0;
+	int	prev_was_conceal = FALSE;
+	if (curwin->w_p_cole > 0
+		&& (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+		&& conceal_cursor_line(curwin))
+	{
+	    int prev_flags;
+
+	    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
+				     curwin->w_cursor.col, FALSE, NULL, FALSE);
+	    prev_flags = get_syntax_info(&prev_seqnr_before);
+	    prev_was_conceal = (prev_flags & HL_CONCEAL)
+						   && prev_seqnr_before > 0;
+	}
+#endif
+
 	if ((!past_line && oneright() == FAIL)
 		|| (past_line && *ml_get_cursor() == NUL)
 		)
@@ -3909,20 +3930,21 @@ nv_right(cmdarg_T *cap)
 	    }
 	}
 #ifdef FEAT_CONCEAL
-	// When 'concealopt' has "cursor", skip remaining characters in the
-	// same concealed region so that "l" moves one screen column.
-	if (curwin->w_p_cole > 0
-		&& (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
-		&& conceal_cursor_line(curwin))
+	// When 'concealopt' has "cursor", finish the visual-column step by
+	// skipping past the rest of the concealed region IF the move stayed
+	// inside the same region (i.e. the cursor was already in the region
+	// before this iteration).  When the move just landed on the first
+	// char of a new region, we must NOT skip: the cursor is already at
+	// the conceal-char position, which is one visual column.
+	if (prev_was_conceal)
 	{
-	    int	    prev_seqnr;
 	    int	    cur_seqnr;
 	    int	    cur_flags;
 
 	    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
 				     curwin->w_cursor.col, FALSE, NULL, FALSE);
-	    cur_flags = get_syntax_info(&prev_seqnr);
-	    if ((cur_flags & HL_CONCEAL) && prev_seqnr > 0)
+	    cur_flags = get_syntax_info(&cur_seqnr);
+	    if ((cur_flags & HL_CONCEAL) && cur_seqnr == prev_seqnr_before)
 	    {
 		while (*ml_get_cursor() != NUL)
 		{
@@ -3931,7 +3953,7 @@ nv_right(cmdarg_T *cap)
 		    (void)syn_get_id(curwin, curwin->w_cursor.lnum,
 				     curwin->w_cursor.col, FALSE, NULL, FALSE);
 		    (void)get_syntax_info(&cur_seqnr);
-		    if (cur_seqnr != prev_seqnr)
+		    if (cur_seqnr != prev_seqnr_before)
 			break;
 		}
 	    }

@@ -2946,18 +2946,37 @@ cursor_up(
 	return FAIL;
 
 #ifdef FEAT_CONCEAL
-    colnr_T	save_curswant = curwin->w_curswant;
-    linenr_T	save_lnum = curwin->w_cursor.lnum;
+    int use_conceal_adv = curwin->w_p_cole > 0
+			 && (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+			 && conceal_cursor_line(curwin);
+
+    // Refresh w_screen_curswant from the pre-move cursor position when the
+    // stored value no longer matches the current w_curswant (it was updated
+    // by some other motion since we last synced).
+    if (use_conceal_adv
+	    && curwin->w_curswant != MAXCOL
+	    && curwin->w_screen_curswant_for != curwin->w_curswant)
+    {
+	int off;
+	colnr_T sc;
+
+	validate_virtcol();
+	off = conceal_col_offset(curwin, curwin->w_cursor.lnum,
+						curwin->w_cursor.col + 1);
+	sc = curwin->w_virtcol - off;
+	if (sc < 0)
+	    sc = 0;
+	curwin->w_screen_curswant = sc;
+	curwin->w_screen_curswant_for = curwin->w_curswant;
+    }
 #endif
 
     cursor_up_inner(curwin, n);
 
     // try to advance to the column we want to be at
 #ifdef FEAT_CONCEAL
-    if (curwin->w_p_cole > 0
-	    && (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
-	    && conceal_cursor_line(curwin))
-	coladvance(conceal_curswant(curwin, save_lnum, save_curswant));
+    if (use_conceal_adv && curwin->w_curswant != MAXCOL)
+	coladvance(conceal_screen_to_vcol(curwin, curwin->w_screen_curswant));
     else
 #endif
 	coladvance(curwin->w_curswant);
@@ -3028,18 +3047,37 @@ cursor_down(
 	return FAIL;
 
 #ifdef FEAT_CONCEAL
-    colnr_T	save_curswant = curwin->w_curswant;
-    linenr_T	save_lnum = curwin->w_cursor.lnum;
+    int use_conceal_adv = curwin->w_p_cole > 0
+			 && (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
+			 && conceal_cursor_line(curwin);
+
+    // Refresh w_screen_curswant from the pre-move cursor position when the
+    // stored value no longer matches the current w_curswant (it was updated
+    // by some other motion since we last synced).
+    if (use_conceal_adv
+	    && curwin->w_curswant != MAXCOL
+	    && curwin->w_screen_curswant_for != curwin->w_curswant)
+    {
+	int off;
+	colnr_T sc;
+
+	validate_virtcol();
+	off = conceal_col_offset(curwin, curwin->w_cursor.lnum,
+						curwin->w_cursor.col + 1);
+	sc = curwin->w_virtcol - off;
+	if (sc < 0)
+	    sc = 0;
+	curwin->w_screen_curswant = sc;
+	curwin->w_screen_curswant_for = curwin->w_curswant;
+    }
 #endif
 
     cursor_down_inner(curwin, n);
 
     // try to advance to the column we want to be at
 #ifdef FEAT_CONCEAL
-    if (curwin->w_p_cole > 0
-	    && (curwin->w_p_ccopt_flags & CCOPT_CURSOR)
-	    && conceal_cursor_line(curwin))
-	coladvance(conceal_curswant(curwin, save_lnum, save_curswant));
+    if (use_conceal_adv && curwin->w_curswant != MAXCOL)
+	coladvance(conceal_screen_to_vcol(curwin, curwin->w_screen_curswant));
     else
 #endif
 	coladvance(curwin->w_curswant);

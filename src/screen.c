@@ -168,42 +168,29 @@ conceal_col_offset(win_T *wp, linenr_T lnum, int col)
 }
 
 /*
- * Compute the buffer virtual column to advance to on the current line, given
- * that the cursor was at "curswant" on line "from_lnum".  Adjusts for the
- * difference in concealed characters between the two lines so that the cursor
- * stays at the same screen column.
+ * Given a target screen column "screen_col", walk window "wp"'s current
+ * cursor line and return the buffer virtual column that maps to that screen
+ * column, accounting for concealed regions.  Used by j/k when 'concealopt'
+ * contains "cursor" so that the cursor stays at the same visible column.
  */
     colnr_T
-conceal_curswant(win_T *wp, linenr_T from_lnum, colnr_T curswant)
+conceal_screen_to_vcol(win_T *wp, int screen_col)
 {
-    int	    from_offset;
-    int	    to_offset;
-    int	    screen_col;
     char_u  *line;
     int	    len;
     int	    i;
-    int	    vcol;
-    int	    prev_seqnr;
+    int	    vcol = 0;
+    int	    to_offset = 0;
+    int	    prev_seqnr = 0;
     int	    seqnr;
     int	    flags;
     int	    c_len;
 
-    // Get the conceal offset at curswant on the source line.
-    from_offset = conceal_col_offset(wp, from_lnum, (int)curswant + 1);
-
-    // The screen column we want to reach.
-    screen_col = (int)curswant - from_offset;
     if (screen_col < 0)
 	screen_col = 0;
 
-    // Walk the destination line to find the buffer column that corresponds
-    // to the desired screen column.
     line = ml_get_buf(wp->w_buffer, wp->w_cursor.lnum, FALSE);
     len = ml_get_buf_len(wp->w_buffer, wp->w_cursor.lnum);
-
-    vcol = 0;
-    to_offset = 0;
-    prev_seqnr = 0;
 
     for (i = 0; i < len; )
     {

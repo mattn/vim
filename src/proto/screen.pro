@@ -2,7 +2,7 @@
 int conceal_cursor_line(win_T *wp);
 void conceal_check_cursor_line(int was_concealed);
 int conceal_col_offset(win_T *wp, linenr_T lnum, int col);
-colnr_T conceal_curswant(win_T *wp, linenr_T from_lnum, colnr_T curswant);
+colnr_T conceal_screen_to_vcol(win_T *wp, int screen_col);
 int get_win_attr(win_T *wp);
 void win_draw_end(win_T *wp, int c1, int c2, int draw_margin, int row, int endrow, hlf_T hl);
 int compute_foldcolumn(win_T *wp, int col);

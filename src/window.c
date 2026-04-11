@@ -1560,6 +1560,10 @@ win_init(win_T *newp, win_T *oldp, int flags UNUSED)
     newp->w_valid = 0;
     newp->w_curswant = oldp->w_curswant;
     newp->w_set_curswant = oldp->w_set_curswant;
+#ifdef FEAT_CONCEAL
+    newp->w_screen_curswant = oldp->w_screen_curswant;
+    newp->w_screen_curswant_for = oldp->w_screen_curswant_for;
+#endif
     newp->w_topline = oldp->w_topline;
 #ifdef FEAT_DIFF
     newp->w_topfill = oldp->w_topfill;
@@ -2517,6 +2521,10 @@ win_init_empty(win_T *wp)
     wp->w_lines_valid = 0;
     wp->w_cursor.lnum = 1;
     wp->w_curswant = wp->w_cursor.col = 0;
+#ifdef FEAT_CONCEAL
+    wp->w_screen_curswant = 0;
+    wp->w_screen_curswant_for = INVALID_SCREEN_CURSWANT;
+#endif
     wp->w_cursor.coladd = 0;
     wp->w_pcmark.lnum = 1;	// pcmark not cleared but set to line 1
     wp->w_pcmark.col = 0;

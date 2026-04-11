@@ -4089,6 +4089,19 @@ struct window_S
 				    // time through cursupdate() to the
 				    // current virtual column
 
+#ifdef FEAT_CONCEAL
+    colnr_T	w_screen_curswant;	// target screen column for j/k when
+					// 'concealopt' has "cursor".  Tracks
+					// the visible column rather than the
+					// buffer virtual column.
+    colnr_T	w_screen_curswant_for;	// value of w_curswant that
+					// w_screen_curswant was last computed
+					// for, used to detect stale state
+					// (INVALID_SCREEN_CURSWANT means
+					// "never computed")
+# define INVALID_SCREEN_CURSWANT (-1)
+#endif
+
 #ifdef FEAT_SYN_HL
     linenr_T	w_last_cursorline;  // where last time 'cursorline' was drawn
 #endif
