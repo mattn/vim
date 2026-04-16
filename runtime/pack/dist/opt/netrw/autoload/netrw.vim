@@ -5304,6 +5304,8 @@ function s:NetrwMarkFileCompress(islocal)
                 if a:islocal
                     if g:netrw_keepdir
                         let fname= netrw#os#Escape(netrw#fs#ComposePath(curdir,fname))
+                    else
+                        let fname= netrw#os#Escape(fname)
                     endif
                     call system(exe." ".fname)
                     if v:shell_error
