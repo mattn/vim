@@ -5640,6 +5640,8 @@ function s:NetrwMarkFileExe(islocal,enbloc)
                 if a:islocal
                     if g:netrw_keepdir
                         let fname= netrw#os#Escape(netrw#fs#WinPath(netrw#fs#ComposePath(curdir,fname)))
+                    else
+                        let fname= netrw#os#Escape(netrw#fs#WinPath(fname))
                     endif
                 else
                     let fname= netrw#os#Escape(netrw#fs#WinPath(b:netrw_curdir.fname))
