@@ -6237,6 +6237,259 @@ chk_modeline(
     return retval;
 }
 
+#if defined(FEAT_EVAL) || defined(PROTO)
+/*
+ * Add a single modeline option "opt" to dict "d".
+ * "opt" has the form "name" or "name=value" and may be modified.
+ * The option name is resolved to its full name via findoption().
+ * Unknown options are silently skipped.
+ */
+    static void
+add_modeline_option(char_u *opt, dict_T *d)
+{
+    char_u  *eq;
+    char_u  *val = NULL;
+    int	    opt_idx;
+    int	    is_no = FALSE;
+    long_u  flags;
+    char_u  *fullname;
+
+    eq = vim_strchr(opt, '=');
+    if (eq != NULL)
+    {
+	*eq = NUL;
+	val = eq + 1;
+    }
+
+    opt_idx = findoption(opt);
+    if (opt_idx < 0 && opt[0] == 'n' && opt[1] == 'o' && opt[2] != NUL)
+    {
+	opt_idx = findoption(opt + 2);
+	if (opt_idx >= 0 && (get_option_flags(opt_idx) & P_BOOL))
+	    is_no = TRUE;
+	else
+	    opt_idx = -1;
+    }
+    if (opt_idx < 0)
+	return;
+
+    flags = get_option_flags(opt_idx);
+    // Match the modeline setter: skip options that are never allowed in
+    // modelines, and skip 'modelineexpr' options when 'modelineexpr' is off.
+    if (flags & (P_SECURE | P_NO_ML))
+	return;
+    if ((flags & P_MLE) && !p_mle)
+	return;
+    fullname = get_option_fullname(opt_idx);
+
+    if (flags & P_BOOL)
+	dict_add_bool(d, (char *)fullname,
+					  is_no ? VVAL_FALSE : VVAL_TRUE);
+    else if (flags & P_NUM)
+    {
+	long	n = 0;
+
+	if (val != NULL)
+	{
+	    char_u  *ep = val;
+	    int	    negative = FALSE;
+
+	    if (*ep == '-')
+	    {
+		negative = TRUE;
+		++ep;
+	    }
+	    n = getdigits(&ep);
+	    if (negative)
+		n = -n;
+	}
+	dict_add_number(d, (char *)fullname, n);
+    }
+    else if (flags & P_STRING)
+	dict_add_string(d, (char *)fullname,
+					  val != NULL ? val : (char_u *)"");
+}
+
+/*
+ * Parse the options part of a modeline (everything after the "vi:"/"vim:"/"ex:"
+ * prefix) and add the resolved options to dict "d".
+ * "s" points to a writable buffer; its contents are modified.
+ * "line_end" points past the last character of the string.
+ */
+    static void
+modeline_opts_to_dict(char_u *s, char_u *line_end, dict_T *d)
+{
+    char_u  *e;
+    int	    end = FALSE;
+
+    while (!end)
+    {
+	s = skipwhite(s);
+	if (*s == NUL)
+	    break;
+
+	// Find end of segment: ':' or end of line.  Unescape "\:" to ":".
+	for (e = s; *e != ':' && *e != NUL; ++e)
+	    if (e[0] == '\\' && e[1] == ':')
+	    {
+		mch_memmove(e, e + 1,
+				       (size_t)(line_end - (e + 1)) + 1);
+		--line_end;
+	    }
+	if (*e == NUL)
+	    end = TRUE;
+
+	// "set" form: segment must end with ':' and is the final segment.
+	if (STRNCMP(s, "set ", (size_t)4) == 0
+		|| STRNCMP(s, "se ", (size_t)3) == 0)
+	{
+	    if (*e != ':')
+		break;
+	    end = TRUE;
+	    s += (*(s + 2) == ' ') ? 3 : 4;
+	}
+	*e = NUL;
+
+	// Split the segment by whitespace and add each option.  Unescape
+	// "\<char>" in place: "\ " -> " ", "\\" -> "\", etc.  Escaped
+	// whitespace does not separate tokens.
+	{
+	    char_u  *p = s;
+
+	    while (*p != NUL)
+	    {
+		char_u	*opt_start;
+		char_u	*write;
+		char_u	*read;
+
+		p = skipwhite(p);
+		if (*p == NUL)
+		    break;
+		opt_start = p;
+		write = p;
+		read = p;
+		while (*read != NUL && !vim_isspace(*read))
+		{
+		    if (read[0] == '\\' && read[1] != NUL)
+			++read;
+		    *write++ = *read++;
+		}
+		p = read;
+		if (*p != NUL)
+		    ++p;
+		*write = NUL;
+		add_modeline_option(opt_start, d);
+	    }
+	}
+
+	s = (e == line_end) ? e : e + 1;
+    }
+}
+
+/*
+ * Look for a modeline in "line" and, if found, add its options to dict "d".
+ */
+    static void
+chk_modeline_to_dict(char_u *line, dict_T *d)
+{
+    char_u  *s;
+    char_u  *e;
+    char_u  *linecopy;
+    char_u  *line_end;
+    size_t  len;
+    int	    prev;
+
+    prev = -1;
+    for (s = line; *s != NUL; ++s)
+    {
+	if (prev == -1 || vim_isspace(prev))
+	{
+	    if ((prev != -1 && STRNCMP(s, "ex:", (size_t)3) == 0)
+		    || STRNCMP(s, "vi:", (size_t)3) == 0)
+		break;
+	    if ((s[0] == 'v' || s[0] == 'V')
+		    && s[1] == 'i' && s[2] == 'm')
+	    {
+		int	vers;
+
+		if (s[3] == '<' || s[3] == '=' || s[3] == '>')
+		    e = s + 4;
+		else
+		    e = s + 3;
+		vers = getdigits(&e);
+		if (*e == ':'
+			&& (s[0] != 'V'
+			  || STRNCMP(skipwhite(e + 1), "set", (size_t)3) == 0)
+			&& (s[3] == ':'
+			    || (VIM_VERSION_100 >= vers && SAFE_isdigit(s[3]))
+			    || (VIM_VERSION_100 < vers && s[3] == '<')
+			    || (VIM_VERSION_100 > vers && s[3] == '>')
+			    || (VIM_VERSION_100 == vers && s[3] == '=')))
+		    break;
+	    }
+	}
+	prev = *s;
+    }
+    if (*s == NUL)
+	return;
+
+    do
+	++s;
+    while (s[-1] != ':');
+
+    len = STRLEN(s);
+    linecopy = vim_strnsave(s, len);
+    if (linecopy == NULL)
+	return;
+    line_end = linecopy + len;
+
+    modeline_opts_to_dict(linecopy, line_end, d);
+
+    vim_free(linecopy);
+}
+
+/*
+ * "modeline([{buf}])" function
+ */
+    void
+f_modeline(typval_T *argvars, typval_T *rettv)
+{
+    buf_T	*buf;
+    linenr_T	lnum;
+    int		nmlines;
+    dict_T	*d;
+
+    if (rettv_dict_alloc(rettv) == FAIL)
+	return;
+    d = rettv->vval.v_dict;
+
+    if (in_vim9script() && check_for_opt_buffer_arg(argvars, 0) == FAIL)
+	return;
+
+    if (argvars[0].v_type == VAR_UNKNOWN)
+	buf = curbuf;
+    else
+    {
+	buf = tv_get_buf_from_arg(&argvars[0]);
+	if (buf == NULL)
+	    return;
+    }
+
+    nmlines = (int)p_mls;
+    if (nmlines <= 0)
+	nmlines = 5;
+
+    for (lnum = 1; lnum <= buf->b_ml.ml_line_count && lnum <= nmlines; ++lnum)
+	chk_modeline_to_dict(ml_get_buf(buf, lnum, FALSE), d);
+
+    for (lnum = buf->b_ml.ml_line_count;
+	    lnum > 0 && lnum > nmlines
+			      && lnum > buf->b_ml.ml_line_count - nmlines;
+	    --lnum)
+	chk_modeline_to_dict(ml_get_buf(buf, lnum, FALSE), d);
+}
+#endif
+
 /*
  * Return TRUE if "buf" is a normal buffer, 'buftype' is empty.
  */

@@ -58,6 +58,7 @@ char_u *fix_fname(char_u *fname);
 void fname_expand(buf_T *buf, char_u **ffname, char_u **sfname);
 void ex_buffer_all(exarg_T *eap);
 void do_modelines(int flags);
+void f_modeline(typval_T *argvars, typval_T *rettv);
 int bt_normal(buf_T *buf);
 int bt_quickfix(buf_T *buf);
 int bt_terminal(buf_T *buf);

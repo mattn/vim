@@ -2581,6 +2581,8 @@ static const funcentry_T global_functions[] =
 			ret_number_bool,    f_mkdir},
     {"mode",		0, 1, FEARG_1,	    arg1_bool,
 			ret_string,	    f_mode},
+    {"modeline",	0, 1, FEARG_1,	    arg1_buffer,
+			ret_dict_any,	    f_modeline},
     {"mzeval",		1, 1, FEARG_1,	    arg1_string,
 			ret_any,
 #ifdef FEAT_MZSCHEME
