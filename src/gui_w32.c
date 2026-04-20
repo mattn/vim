@@ -3346,7 +3346,7 @@ gui_mch_set_tabdrag(int flag)
 	if (flag)
 	    // Each tab is this many DPI-scaled pixels wide.
 	    SendMessage(s_tabhwnd, TCM_SETITEMSIZE, 0,
-		    MAKELPARAM(MulDiv(120, (int)s_dpi, 96),
+		    MAKELPARAM(MulDiv(100, (int)s_dpi, 96),
 				gui.tabline_height));
 	InvalidateRect(s_tabhwnd, NULL, TRUE);
     }
@@ -8767,6 +8767,13 @@ GetTabFromPoint(
 static POINT	    s_pt = {0, 0};
 static HCURSOR      s_hCursor = NULL;
 
+// Width reserved on the left of the tabline for the Vim icon in 'E' mode.
+    static int
+tabline_icon_w(void)
+{
+    return MulDiv(32, (int)s_dpi, 96);
+}
+
 // Caption buttons drawn on the right edge of the tabline when 'E' is on.
 #define TABLINE_BTN_COUNT   3
 #define TABLINE_BTN_MIN	    0
@@ -8774,6 +8781,56 @@ static HCURSOR      s_hCursor = NULL;
 #define TABLINE_BTN_CLOSE   2
 static int	    tabline_hover_btn = -1;
 static int	    tabline_pressed_btn = -1;
+
+// Per-tab close-X hover state: which tab is hovered, and whether the mouse
+// is specifically over its small close button.
+static int	    tabline_tab_hover = -1;
+static int	    tabline_close_hover = -1;
+static int	    tabline_close_pressed = -1;
+
+    static void
+tabline_close_rect(HWND hwnd, int idx, RECT *out)
+{
+    RECT    r;
+    int	    icon_w = tabline_icon_w();
+    int	    sz = MulDiv(16, (int)s_dpi, 96);
+    int	    pad = MulDiv(6, (int)s_dpi, 96);
+
+    TabCtrl_GetItemRect(hwnd, idx, &r);
+    out->right = r.right + icon_w - pad;
+    out->left = out->right - sz;
+    out->top = r.top + (r.bottom - r.top - sz) / 2;
+    out->bottom = out->top + sz;
+}
+
+    static int
+tabline_close_at(HWND hwnd, POINT pt_visual)
+{
+    int n = TabCtrl_GetItemCount(hwnd);
+    int i;
+
+    for (i = 0; i < n; ++i)
+    {
+	RECT cr;
+	tabline_close_rect(hwnd, i, &cr);
+	if (PtInRect(&cr, pt_visual))
+	    return i;
+    }
+    return -1;
+}
+
+    static int
+tabline_tab_at_visual(HWND hwnd, POINT pt_visual)
+{
+    TCHITTESTINFO  ht;
+    int		   icon_w = tabline_icon_w();
+
+    if (pt_visual.x < icon_w)
+	return -1;
+    ht.pt.x = pt_visual.x - icon_w;
+    ht.pt.y = pt_visual.y;
+    return TabCtrl_HitTest(hwnd, &ht);
+}
 
     static void
 tabline_btn_rects(HWND hwnd, RECT rects[TABLINE_BTN_COUNT])
@@ -8860,10 +8917,10 @@ tabline_draw_item(DRAWITEMSTRUCT *dis)
 
     if (hl & HL_BOLD)
     {
-	HFONT f = (HFONT)gui.norm_font;
+	// Derive a bold variant of whatever font is currently selected into
+	// the DC (the WM_PAINT handler picks a tab-sized font for us).
+	HFONT f = (HFONT)GetCurrentObject(dis->hDC, OBJ_FONT);
 	LOGFONTW lf;
-	if (f == NULL)
-	    f = (HFONT)SendMessage(dis->hwndItem, WM_GETFONT, 0, 0);
 	if (f != NULL && GetObjectW(f, sizeof(lf), &lf))
 	{
 	    lf.lfWeight = FW_BOLD;
@@ -8940,26 +8997,102 @@ tabline_wndproc(
 	n = TabCtrl_GetItemCount(hwnd);
 	cur = TabCtrl_GetCurSel(hwnd);
 	{
-	    // Use Vim's main text font so tab labels look consistent with the
-	    // buffer text.  Fall back to the tab control's WM_SETFONT value if
-	    // norm_font is not ready yet.
-	    HFONT hf = (HFONT)gui.norm_font;
+	    // Use a slightly smaller version of gui.norm_font for the tab
+	    // labels — the buffer font at full size looks cramped for tabs.
+	    // Cache the derived font and rebuild it only when norm_font or
+	    // DPI changes.
+	    static HFONT    tab_font = NULL;
+	    static HFONT    tab_font_src = NULL;
+	    static int	    tab_font_dpi = 0;
+	    HFONT	    hf = NULL;
+
+	    if (gui.norm_font != NOFONT
+		    && ((HFONT)gui.norm_font != tab_font_src
+			|| (int)s_dpi != tab_font_dpi))
+	    {
+		LOGFONTW lf;
+		if (GetObjectW((HFONT)gui.norm_font, sizeof(lf), &lf))
+		{
+		    lf.lfHeight = (lf.lfHeight < 0 ? -1 : 1)
+					* (abs(lf.lfHeight) * 92 / 100);
+		    lf.lfWeight = FW_NORMAL;
+		    if (tab_font != NULL)
+			DeleteObject(tab_font);
+		    tab_font = CreateFontIndirectW(&lf);
+		    tab_font_src = (HFONT)gui.norm_font;
+		    tab_font_dpi = (int)s_dpi;
+		}
+	    }
+
+	    hf = tab_font;
 	    if (hf == NULL)
 		hf = (HFONT)SendMessage(hwnd, WM_GETFONT, 0, 0);
 	    if (hf == NULL)
 		hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
 	    SelectObject(hdc, hf);
 	}
-	for (i = 0; i < n; ++i)
 	{
-	    DRAWITEMSTRUCT dis;
-	    vim_memset(&dis, 0, sizeof(dis));
-	    dis.hDC = hdc;
-	    dis.hwndItem = hwnd;
-	    dis.itemID = (UINT)i;
-	    dis.itemState = (i == cur) ? ODS_SELECTED : 0;
-	    TabCtrl_GetItemRect(hwnd, i, &dis.rcItem);
-	    tabline_draw_item(&dis);
+	    int icon_w = tabline_icon_w();
+	    for (i = 0; i < n; ++i)
+	    {
+		DRAWITEMSTRUCT dis;
+		vim_memset(&dis, 0, sizeof(dis));
+		dis.hDC = hdc;
+		dis.hwndItem = hwnd;
+		dis.itemID = (UINT)i;
+		dis.itemState = (i == cur) ? ODS_SELECTED : 0;
+		TabCtrl_GetItemRect(hwnd, i, &dis.rcItem);
+		// Shift tabs right to make room for the app icon.  The native
+		// control still hit-tests at the unshifted rect; we undo this
+		// shift in the mouse handlers so clicks land on the right tab.
+		dis.rcItem.left += icon_w;
+		dis.rcItem.right += icon_w;
+		tabline_draw_item(&dis);
+
+		// Small close-X on the right side of the hovered tab.
+		if (i == tabline_tab_hover)
+		{
+		    RECT	cr;
+		    guicolor_T	fg2, bg2;
+		    COLORREF	fg_col;
+
+		    tabline_close_rect(hwnd, i, &cr);
+		    tabline_hl_colors(
+			    (i == cur) ? "TabLineSel" : "TabLine",
+			    &fg2, &bg2);
+		    fg_col = (fg2 == INVALCOLOR)
+			    ? GetSysColor(COLOR_WINDOWTEXT) : (COLORREF)fg2;
+		    if (i == tabline_close_hover)
+		    {
+			HBRUSH hb = CreateSolidBrush(
+					    RGB(0xE8, 0x11, 0x23));
+			FillRect(hdc, &cr, hb);
+			DeleteObject(hb);
+			fg_col = RGB(0xFF, 0xFF, 0xFF);
+		    }
+		    SetTextColor(hdc, fg_col);
+		    SetBkMode(hdc, TRANSPARENT);
+		    DrawTextW(hdc, L"\u2715", -1, &cr,
+			    DT_CENTER | DT_VCENTER | DT_SINGLELINE
+			    | DT_NOPREFIX);
+		}
+	    }
+	}
+
+	// Vim icon on the far left.
+	{
+	    static HICON    app_icon = NULL;
+	    int		    icon_w = tabline_icon_w();
+	    int		    icon_h = MulDiv(16, (int)s_dpi, 96);
+
+	    if (app_icon == NULL)
+		app_icon = LoadIcon(
+			(HINSTANCE)GetModuleHandle(NULL), "IDR_VIM");
+	    if (app_icon != NULL)
+		DrawIconEx(hdc,
+			(icon_w - icon_h) / 2,
+			(crc.bottom - icon_h) / 2,
+			app_icon, icon_h, icon_h, 0, NULL, DI_NORMAL);
 	}
 
 	// Caption buttons on the right edge: minimize / maximize-restore / close.
@@ -9006,9 +9139,13 @@ tabline_wndproc(
     switch (uMsg)
     {
 	case WM_MOUSELEAVE:
-	    if (tabline_hover_btn != -1)
+	    if (tabline_hover_btn != -1
+		    || tabline_tab_hover != -1
+		    || tabline_close_hover != -1)
 	    {
 		tabline_hover_btn = -1;
+		tabline_tab_hover = -1;
+		tabline_close_hover = -1;
 		InvalidateRect(hwnd, NULL, FALSE);
 	    }
 	    break;
@@ -9027,6 +9164,24 @@ tabline_wndproc(
 			SetCapture(hwnd);
 			return 0;
 		    }
+		    // Per-tab close-X: remember which tab was pressed and
+		    // only close on release (matches button UX).
+		    {
+			int cidx = tabline_close_at(hwnd, s_pt);
+			if (cidx >= 0)
+			{
+			    tabline_close_pressed = cidx;
+			    SetCapture(hwnd);
+			    return 0;
+			}
+		    }
+		    if (s_pt.x < tabline_icon_w())
+			return 0;	    // click on the icon: swallow
+		    // Shift so the coord matches the unshifted tab rects the
+		    // native control uses — this keeps fall-through tab
+		    // selection in sync with what the user sees.
+		    s_pt.x -= tabline_icon_w();
+		    lParam = MAKELPARAM(s_pt.x, s_pt.y);
 		}
 
 		// In Windows Terminal-like mode the empty tabline area acts as
@@ -9044,10 +9199,11 @@ tabline_wndproc(
 		    hit = TabCtrl_HitTest(hwnd, &htinfo);
 		    if (hit == -1 || TabCtrl_GetItemCount(hwnd) <= 1)
 		    {
-			// DefWindowProc needs the click position in screen
-			// coordinates via lParam; passing 0 makes the move
-			// loop jump the window to (0,0).
-			scr = s_pt;
+			// Convert back to real client coords before mapping to
+			// screen, so the drag starts from where the user
+			// actually clicked.
+			scr.x = s_pt.x + tabline_icon_w();
+			scr.y = s_pt.y;
 			ClientToScreen(hwnd, &scr);
 			ReleaseCapture();
 			SendMessage(s_hwnd, WM_NCLBUTTONDOWN,
@@ -9055,6 +9211,12 @@ tabline_wndproc(
 				MAKELPARAM(scr.x, scr.y));
 			return 0;
 		    }
+		    // Native only invalidates the previously- and newly-
+		    // selected tab's unshifted rect on selection change; that
+		    // clips our WM_PAINT so the highlight misses the icon-wide
+		    // shift.  Invalidate the whole tabline up front so the
+		    // selection repaint covers the visible rect.
+		    InvalidateRect(hwnd, NULL, FALSE);
 		}
 		SetCapture(hwnd);
 		s_hCursor = GetCursor(); // backup default cursor
@@ -9071,6 +9233,10 @@ tabline_wndproc(
 		    // Double-click on a caption button: don't treat as drag.
 		    if (tabline_btn_at(hwnd, pt) >= 0)
 			return 0;
+		    if (pt.x < tabline_icon_w())
+			return 0;
+		    pt.x -= tabline_icon_w();
+		    lParam = MAKELPARAM(pt.x, pt.y);
 
 		    htinfo.pt = pt;
 		    hit = TabCtrl_HitTest(hwnd, &htinfo);
@@ -9087,22 +9253,38 @@ tabline_wndproc(
 	case WM_MOUSEMOVE:
 	    if (tabdrag_on)
 	    {
-		POINT mpt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
-		int   b = tabline_btn_at(hwnd, mpt);
-		if (b != tabline_hover_btn)
+		POINT		mpt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+		int		b = tabline_btn_at(hwnd, mpt);
+		int		th = tabline_tab_at_visual(hwnd, mpt);
+		int		ch = tabline_close_at(hwnd, mpt);
+		TRACKMOUSEEVENT tme;
+
+		if (b != tabline_hover_btn
+			|| th != tabline_tab_hover
+			|| ch != tabline_close_hover)
 		{
 		    tabline_hover_btn = b;
+		    tabline_tab_hover = th;
+		    tabline_close_hover = ch;
 		    InvalidateRect(hwnd, NULL, FALSE);
 		}
+		tme.cbSize = sizeof(tme);
+		tme.dwFlags = TME_LEAVE;
+		tme.hwndTrack = hwnd;
+		tme.dwHoverTime = 0;
+		TrackMouseEvent(&tme);
+
 		if (b >= 0)
-		{
-		    TRACKMOUSEEVENT tme;
-		    tme.cbSize = sizeof(tme);
-		    tme.dwFlags = TME_LEAVE;
-		    tme.hwndTrack = hwnd;
-		    tme.dwHoverTime = 0;
-		    TrackMouseEvent(&tme);
 		    return 0;
+		// Shift the x coord so drag-reorder and the fall-through
+		// native handler use the same frame as the shifted tab rects.
+		{
+		    int x = GET_X_LPARAM(lParam);
+		    if (x >= tabline_icon_w())
+			x -= tabline_icon_w();
+		    else
+			x = 0;
+		    lParam = MAKELPARAM(x, GET_Y_LPARAM(lParam));
 		}
 	    }
 	    if (GetCapture() == hwnd
@@ -9160,6 +9342,20 @@ tabline_wndproc(
 			    cmd = IsZoomed(s_hwnd) ? SC_RESTORE : SC_MAXIMIZE;
 			PostMessage(s_hwnd, WM_SYSCOMMAND, cmd, 0);
 		    }
+		    return 0;
+		}
+		if (tabdrag_on && tabline_close_pressed >= 0)
+		{
+		    POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+		    int   c = tabline_close_at(hwnd, pt);
+		    int   pressed = tabline_close_pressed;
+
+		    tabline_close_pressed = -1;
+		    if (GetCapture() == hwnd)
+			ReleaseCapture();
+		    if (c == pressed)
+			send_tabline_menu_event(pressed + 1,
+						    TABLINE_MENU_CLOSE);
 		    return 0;
 		}
 		if (GetCapture() == hwnd)
