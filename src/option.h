@@ -292,6 +292,7 @@ typedef enum {
 #define GO_TITLEBAR	'C'		// use 'hl-TitleBar'
 #define GO_DARKTHEME	'd'		// use dark theme variant
 #define GO_TABLINE	'e'		// may show tabline
+#define GO_TABDRAG	'E'		// frameless window; drag tabline to move
 #define GO_FORG		'f'		// start GUI in foreground
 #define GO_GREY		'g'		// use grey menu items
 #define GO_HORSCROLL	'h'		// flexible horizontal scrolling
@@ -311,7 +312,7 @@ typedef enum {
 #define GO_VERTICAL	'v'		// arrange dialog buttons vertically
 #define GO_KEEPWINSIZE	'k'		// keep GUI window size
 // all possible flags for 'go'
-#define GO_ALL		"!aAbcCdefFghilLmMpPrRstTvk"
+#define GO_ALL		"!aAbcCdeEfFghilLmMpPrRstTvk"
 
 // flags for 'comments' option
 #define COM_NEST	'n'		// comments strings nest

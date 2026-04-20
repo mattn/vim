@@ -45,6 +45,7 @@ void gui_mch_update_tabline(void);
 void gui_mch_set_curtab(int nr);
 void gui_mch_set_dark_theme(int dark);
 void gui_mch_set_fullscreen(int flag);
+void gui_mch_set_tabdrag(int flag);
 void ex_simalt(exarg_T *eap);
 void gui_mch_find_dialog(exarg_T *eap);
 void gui_mch_replace_dialog(exarg_T *eap);

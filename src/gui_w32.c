@@ -422,6 +422,18 @@ static HRESULT (WINAPI *pDwmSetWindowAttribute)(HWND, DWORD, LPCVOID, DWORD);
 static void dyn_dwm_load(void);
 
 static int fullscreen_on = FALSE;
+static int tabdrag_on = FALSE;
+
+/*
+ * Use the system font for dialogs and tear-off menus.  Defined here (ahead of
+ * its historical position) so the tabline helpers can reference
+ * set_tabline_font() via a forward declaration.
+ */
+#define USE_SYSMENU_FONT
+
+#ifdef FEAT_GUI_TABLINE
+static void set_tabline_font(void);
+#endif
 
 #ifdef FEAT_GUI_DARKTHEME
 
@@ -3029,7 +3041,24 @@ gui_mch_show_tabline(int showit)
     if (!showit != !showing_tabline)
     {
 	if (showit)
+	{
+	    // The tab control is created with zero size and normally gets its
+	    // bounds from _OnSizeTextArea, which only fires when WM_SIZE
+	    // arrives on s_textArea.  If toggling the tabline does not change
+	    // the text area size (as happens in 'E' mode where removing the
+	    // caption compensates the added tabline), _OnSizeTextArea is
+	    // skipped and the control is left at 0x0.  Size it explicitly.
+	    RECT rect;
+	    int  top = 0;
+# ifdef FEAT_TOOLBAR
+	    if (vim_strchr(p_go, GO_TOOLBAR) != NULL)
+		top = gui.toolbar_height;
+# endif
+	    GetClientRect(s_hwnd, &rect);
+	    MoveWindow(s_tabhwnd, 0, top, rect.right,
+					    gui.tabline_height, TRUE);
 	    ShowWindow(s_tabhwnd, SW_SHOW);
+	}
 	else
 	    ShowWindow(s_tabhwnd, SW_HIDE);
 	showing_tabline = showit;
@@ -3236,6 +3265,105 @@ gui_mch_set_fullscreen(int flag)
 
 	fullscreen_on = FALSE;
     }
+}
+
+/*
+ * Windows Terminal-like mode: when flag is TRUE, remove the title bar from the
+ * main window so that only the tabline (which the drag subclass turns into a
+ * caption) is visible at the top of the window.
+ */
+    void
+gui_mch_set_tabdrag(int flag)
+{
+    static LONG_PTR normal_style;
+    LONG_PTR	    style;
+    RECT	    rc;
+
+    if (!full_screen || s_hwnd == NULL) // Window not set yet.
+	return;
+    if (fullscreen_on) // Don't fight the fullscreen code for WS_CAPTION.
+	return;
+
+    if (flag)
+    {
+	if (tabdrag_on)
+	    return;
+	normal_style = GetWindowLongPtr(s_hwnd, GWL_STYLE);
+	style = normal_style & ~WS_CAPTION;
+	SetWindowLongPtr(s_hwnd, GWL_STYLE, style);
+	tabdrag_on = TRUE;
+    }
+    else
+    {
+	if (!tabdrag_on)
+	    return;
+	SetWindowLongPtr(s_hwnd, GWL_STYLE, normal_style);
+	tabdrag_on = FALSE;
+    }
+
+    // Resize the tabline to fit the text font (gui.norm_font) we use in
+    // owner-draw, instead of the small menu font that set_tabline_font()
+    // computed.  Match one full character cell so a row of text + tabline
+    // stays a multiple of char_height — this avoids a half-row gap when the
+    // caption is toggled off.  Restore the default when leaving 'E' mode.
+    if (flag && gui.char_height > 0)
+	gui.tabline_height = gui.char_height + 4;
+    else if (!flag)
+	set_tabline_font();
+
+    // Toggle owner-draw on the tab control so TabLine / TabLineSel /
+    // TabLineFill highlight groups can style it.  We rely on our WM_PAINT
+    // override to hide the default 3D chrome, so TCS_BUTTONS is not needed
+    // (and it would disable the control's automatic tab-selection on click).
+    // TCS_FIXEDWIDTH lets us force a uniform, comfortable tab width.
+    if (s_tabhwnd != NULL)
+    {
+	static HRESULT (WINAPI *pSetWindowTheme)(HWND, LPCWSTR, LPCWSTR) = NULL;
+	static int	theme_loaded = FALSE;
+	const LONG_PTR	mask = TCS_OWNERDRAWFIXED | TCS_FIXEDWIDTH;
+	LONG_PTR tstyle = GetWindowLongPtr(s_tabhwnd, GWL_STYLE);
+
+	if (flag)
+	    tstyle |= mask;
+	else
+	    tstyle &= ~mask;
+	SetWindowLongPtr(s_tabhwnd, GWL_STYLE, tstyle);
+
+	// Visual Styles keep drawing 3D chrome even with flat styles.  Disable
+	// the theme on the tab control so owner-draw fully controls the look;
+	// restore the default ("Tab") theme when 'E' is off.
+	if (!theme_loaded)
+	{
+	    HINSTANCE h = vimLoadLib("uxtheme.dll");
+	    if (h != NULL)
+		pSetWindowTheme = (HRESULT (WINAPI *)(HWND, LPCWSTR, LPCWSTR))
+				    GetProcAddress(h, "SetWindowTheme");
+	    theme_loaded = TRUE;
+	}
+	if (pSetWindowTheme != NULL)
+	    pSetWindowTheme(s_tabhwnd, flag ? L"" : NULL, flag ? L"" : NULL);
+
+	if (flag)
+	    // Each tab is this many DPI-scaled pixels wide.
+	    SendMessage(s_tabhwnd, TCM_SETITEMSIZE, 0,
+		    MAKELPARAM(MulDiv(120, (int)s_dpi, 96),
+				gui.tabline_height));
+	InvalidateRect(s_tabhwnd, NULL, TRUE);
+    }
+
+    // Preserve the outer window rect so the client area shifts rather than the
+    // window jumping when the caption comes and goes.
+    GetWindowRect(s_hwnd, &rc);
+    SetWindowPos(s_hwnd, NULL,
+	    rc.left, rc.top,
+	    rc.right - rc.left, rc.bottom - rc.top,
+	    SWP_NOZORDER | SWP_NOACTIVATE | SWP_FRAMECHANGED);
+
+    // Snap the outer window to exactly Rows * char_height + overhead with the
+    // updated base_height (caption gone / tabline resized).  This avoids the
+    // half-row dead strip at the bottom without leaking that strip into
+    // something that looks like cmdheight=2.
+    gui_set_shellsize(TRUE, FALSE, RESIZE_VERT);
 }
 
 /*
@@ -4572,12 +4700,6 @@ static DWORD	    last_user_activity = 0;
 static UINT	s_menu_id = 100;
 #endif
 
-/*
- * Use the system font for dialogs and tear-off menus.  Remove this line to
- * use DLG_FONT_NAME.
- */
-#define USE_SYSMENU_FONT
-
 #define VIM_NAME	"vim"
 #define VIM_CLASSW	L"Vim"
 
@@ -4620,6 +4742,7 @@ static int get_toolbar_bitmap(vimmenu_T *menu);
 
 #ifdef FEAT_GUI_TABLINE
 static void initialise_tabline(void);
+static void tabline_draw_item(DRAWITEMSTRUCT *dis);
 static LRESULT CALLBACK tabline_wndproc(HWND hwnd, UINT uMsg, WPARAM wParam, LPARAM lParam);
 #endif
 
@@ -5352,6 +5475,16 @@ _WndProc(
 #ifdef FEAT_GUI_TABLINE
 	HANDLE_MSG(hwnd, WM_RBUTTONUP,	_OnRButtonUp);
 	HANDLE_MSG(hwnd, WM_LBUTTONDBLCLK,  _OnLButtonDown);
+    case WM_DRAWITEM:
+	{
+	    DRAWITEMSTRUCT *dis = (DRAWITEMSTRUCT *)lParam;
+	    if (dis != NULL && dis->hwndItem == s_tabhwnd && tabdrag_on)
+	    {
+		tabline_draw_item(dis);
+		return TRUE;
+	    }
+	}
+	break;
 #endif
 	HANDLE_MSG(hwnd, WM_NCHITTEST,	_OnNCHitTest);
 
@@ -6125,7 +6258,8 @@ gui_mch_set_shellsize(
 		     pGetSystemMetricsForDpi(SM_CXPADDEDBORDER, s_dpi)) * 2;
     win_height = height + (pGetSystemMetricsForDpi(SM_CYFRAME, s_dpi) +
 		       pGetSystemMetricsForDpi(SM_CXPADDEDBORDER, s_dpi)) * 2
-			+ pGetSystemMetricsForDpi(SM_CYCAPTION, s_dpi)
+			+ ((GetWindowLongPtr(s_hwnd, GWL_STYLE) & WS_CAPTION)
+			    ? pGetSystemMetricsForDpi(SM_CYCAPTION, s_dpi) : 0)
 			+ gui_mswin_get_menu_height(FALSE);
 
     // The following should take care of keeping Vim on the same monitor, no
@@ -8633,6 +8767,126 @@ GetTabFromPoint(
 static POINT	    s_pt = {0, 0};
 static HCURSOR      s_hCursor = NULL;
 
+// Caption buttons drawn on the right edge of the tabline when 'E' is on.
+#define TABLINE_BTN_COUNT   3
+#define TABLINE_BTN_MIN	    0
+#define TABLINE_BTN_MAX	    1
+#define TABLINE_BTN_CLOSE   2
+static int	    tabline_hover_btn = -1;
+static int	    tabline_pressed_btn = -1;
+
+    static void
+tabline_btn_rects(HWND hwnd, RECT rects[TABLINE_BTN_COUNT])
+{
+    RECT    crc;
+    int	    btn_w;
+    int	    i;
+
+    GetClientRect(hwnd, &crc);
+    btn_w = MulDiv(46, (int)s_dpi, 96);
+    rects[TABLINE_BTN_CLOSE].right = crc.right;
+    rects[TABLINE_BTN_CLOSE].left = crc.right - btn_w;
+    rects[TABLINE_BTN_MAX].right = rects[TABLINE_BTN_CLOSE].left;
+    rects[TABLINE_BTN_MAX].left = rects[TABLINE_BTN_MAX].right - btn_w;
+    rects[TABLINE_BTN_MIN].right = rects[TABLINE_BTN_MAX].left;
+    rects[TABLINE_BTN_MIN].left = rects[TABLINE_BTN_MIN].right - btn_w;
+    for (i = 0; i < TABLINE_BTN_COUNT; ++i)
+    {
+	rects[i].top = crc.top;
+	rects[i].bottom = crc.bottom;
+    }
+}
+
+    static int
+tabline_btn_at(HWND hwnd, POINT pt)
+{
+    RECT rects[TABLINE_BTN_COUNT];
+    int  i;
+
+    tabline_btn_rects(hwnd, rects);
+    for (i = 0; i < TABLINE_BTN_COUNT; ++i)
+	if (PtInRect(&rects[i], pt))
+	    return i;
+    return -1;
+}
+
+/*
+ * Look up a highlight group's GUI fg/bg.  Returns the 'gui' flags (HL_BOLD
+ * etc.); fills fgp/bgp with INVALCOLOR when unset so callers can fall back.
+ */
+    static int
+tabline_hl_colors(char *name, guicolor_T *fgp, guicolor_T *bgp)
+{
+    int hl_id = syn_name2id((char_u *)name);
+    *fgp = INVALCOLOR;
+    *bgp = INVALCOLOR;
+    if (hl_id <= 0)
+	return 0;
+    return syn_id2colors(hl_id, fgp, bgp);
+}
+
+/*
+ * Owner-draw a single tab using TabLine / TabLineSel highlight colors.
+ * Active when 'E' is in 'guioptions' (TCS_OWNERDRAWFIXED is set then).
+ */
+    static void
+tabline_draw_item(DRAWITEMSTRUCT *dis)
+{
+    int		is_sel = (dis->itemState & ODS_SELECTED) != 0;
+    guicolor_T	fg, bg;
+    int		hl = tabline_hl_colors(is_sel ? "TabLineSel" : "TabLine",
+								    &fg, &bg);
+    HBRUSH	hbr;
+    WCHAR	wtext[256];
+    TCITEMW	ti;
+    RECT	tr;
+    HFONT	old_font = NULL, bold_font = NULL;
+
+    if (bg == INVALCOLOR)
+	bg = GetSysColor(is_sel ? COLOR_WINDOW : COLOR_3DFACE);
+    if (fg == INVALCOLOR)
+	fg = GetSysColor(COLOR_WINDOWTEXT);
+
+    hbr = CreateSolidBrush((COLORREF)bg);
+    FillRect(dis->hDC, &dis->rcItem, hbr);
+    DeleteObject(hbr);
+
+    ti.mask = TCIF_TEXT;
+    ti.pszText = wtext;
+    ti.cchTextMax = (int)ARRAY_LENGTH(wtext);
+    wtext[0] = L'\0';
+    SendMessageW(dis->hwndItem, TCM_GETITEMW,
+					    (WPARAM)dis->itemID, (LPARAM)&ti);
+
+    if (hl & HL_BOLD)
+    {
+	HFONT f = (HFONT)gui.norm_font;
+	LOGFONTW lf;
+	if (f == NULL)
+	    f = (HFONT)SendMessage(dis->hwndItem, WM_GETFONT, 0, 0);
+	if (f != NULL && GetObjectW(f, sizeof(lf), &lf))
+	{
+	    lf.lfWeight = FW_BOLD;
+	    bold_font = CreateFontIndirectW(&lf);
+	    if (bold_font != NULL)
+		old_font = (HFONT)SelectObject(dis->hDC, bold_font);
+	}
+    }
+
+    SetTextColor(dis->hDC, (COLORREF)fg);
+    SetBkMode(dis->hDC, TRANSPARENT);
+    tr = dis->rcItem;
+    tr.left += 6;
+    tr.right -= 6;
+    DrawTextW(dis->hDC, wtext, -1, &tr,
+		    DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+
+    if (old_font != NULL)
+	SelectObject(dis->hDC, old_font);
+    if (bold_font != NULL)
+	DeleteObject(bold_font);
+}
+
     static LRESULT CALLBACK
 tabline_wndproc(
     HWND hwnd,
@@ -8649,17 +8903,208 @@ tabline_wndproc(
 
     HandleMouseHide(uMsg, lParam);
 
+    // The native tab control returns HTTRANSPARENT from WM_NCHITTEST for the
+    // area below/beside the tab row so that child "tab pages" placed there
+    // receive the click instead.  That makes our empty-area drag impossible:
+    // force HTCLIENT so mouse events actually reach this window.
+    if (uMsg == WM_NCHITTEST && tabdrag_on)
+	return HTCLIENT;
+
+    // In 'E' mode WM_PAINT fully repaints the client.  Tell Windows not to
+    // erase the background so we don't see a default-theme flash underneath.
+    if (uMsg == WM_ERASEBKGND && tabdrag_on)
+	return 1;
+
+    // Take over WM_PAINT so the native 3D chrome / page-border / tab bezels
+    // never render.  Fill the row with TabLineFill and draw each tab via the
+    // same helper used for WM_DRAWITEM.
+    if (uMsg == WM_PAINT && tabdrag_on)
+    {
+	PAINTSTRUCT	ps;
+	HDC		hdc;
+	RECT		crc;
+	guicolor_T	fg, bg;
+	HBRUSH		hbr;
+	int		i, n, cur;
+
+	hdc = BeginPaint(hwnd, &ps);
+	GetClientRect(hwnd, &crc);
+
+	tabline_hl_colors("TabLineFill", &fg, &bg);
+	if (bg == INVALCOLOR)
+	    bg = GetSysColor(COLOR_3DFACE);
+	hbr = CreateSolidBrush((COLORREF)bg);
+	FillRect(hdc, &crc, hbr);
+	DeleteObject(hbr);
+
+	n = TabCtrl_GetItemCount(hwnd);
+	cur = TabCtrl_GetCurSel(hwnd);
+	{
+	    // Use Vim's main text font so tab labels look consistent with the
+	    // buffer text.  Fall back to the tab control's WM_SETFONT value if
+	    // norm_font is not ready yet.
+	    HFONT hf = (HFONT)gui.norm_font;
+	    if (hf == NULL)
+		hf = (HFONT)SendMessage(hwnd, WM_GETFONT, 0, 0);
+	    if (hf == NULL)
+		hf = (HFONT)GetStockObject(DEFAULT_GUI_FONT);
+	    SelectObject(hdc, hf);
+	}
+	for (i = 0; i < n; ++i)
+	{
+	    DRAWITEMSTRUCT dis;
+	    vim_memset(&dis, 0, sizeof(dis));
+	    dis.hDC = hdc;
+	    dis.hwndItem = hwnd;
+	    dis.itemID = (UINT)i;
+	    dis.itemState = (i == cur) ? ODS_SELECTED : 0;
+	    TabCtrl_GetItemRect(hwnd, i, &dis.rcItem);
+	    tabline_draw_item(&dis);
+	}
+
+	// Caption buttons on the right edge: minimize / maximize-restore / close.
+	{
+	    RECT	bts[TABLINE_BTN_COUNT];
+	    static const WCHAR *glyphs[TABLINE_BTN_COUNT] = {
+		L"\u2013",		// en-dash for minimize
+		L"\u25A1",		// white square for maximize/restore
+		L"\u2715",		// multiplication X for close
+	    };
+
+	    tabline_btn_rects(hwnd, bts);
+	    SetBkMode(hdc, TRANSPARENT);
+	    for (i = 0; i < TABLINE_BTN_COUNT; ++i)
+	    {
+		guicolor_T  fg2, bg2;
+		COLORREF    text_col;
+
+		tabline_hl_colors("TabLine", &fg2, &bg2);
+		text_col = (fg2 == INVALCOLOR)
+			    ? GetSysColor(COLOR_WINDOWTEXT) : (COLORREF)fg2;
+
+		if (i == tabline_hover_btn)
+		{
+		    // Close hover = red, others = a soft overlay.
+		    COLORREF  bg_col = (i == TABLINE_BTN_CLOSE)
+				? RGB(0xE8, 0x11, 0x23) : RGB(0x55, 0x55, 0x55);
+		    HBRUSH    hb = CreateSolidBrush(bg_col);
+		    FillRect(hdc, &bts[i], hb);
+		    DeleteObject(hb);
+		    if (i == TABLINE_BTN_CLOSE)
+			text_col = RGB(0xFF, 0xFF, 0xFF);
+		}
+		SetTextColor(hdc, text_col);
+		DrawTextW(hdc, glyphs[i], -1, &bts[i],
+			DT_CENTER | DT_VCENTER | DT_SINGLELINE | DT_NOPREFIX);
+	    }
+	}
+
+	EndPaint(hwnd, &ps);
+	return 0;
+    }
+
     switch (uMsg)
     {
+	case WM_MOUSELEAVE:
+	    if (tabline_hover_btn != -1)
+	    {
+		tabline_hover_btn = -1;
+		InvalidateRect(hwnd, NULL, FALSE);
+	    }
+	    break;
+
 	case WM_LBUTTONDOWN:
 	    {
 		s_pt.x = GET_X_LPARAM(lParam);
 		s_pt.y = GET_Y_LPARAM(lParam);
+
+		if (tabdrag_on)
+		{
+		    int b = tabline_btn_at(hwnd, s_pt);
+		    if (b >= 0)
+		    {
+			tabline_pressed_btn = b;
+			SetCapture(hwnd);
+			return 0;
+		    }
+		}
+
+		// In Windows Terminal-like mode the empty tabline area acts as
+		// a caption: clicking it should begin a window drag rather than
+		// starting a tab re-order gesture.  With a single tab there may
+		// be no empty space at all, so treat the lone tab itself as a
+		// drag handle too.
+		if (tabdrag_on)
+		{
+		    TCHITTESTINFO htinfo;
+		    POINT	  scr;
+		    int		  hit;
+
+		    htinfo.pt = s_pt;
+		    hit = TabCtrl_HitTest(hwnd, &htinfo);
+		    if (hit == -1 || TabCtrl_GetItemCount(hwnd) <= 1)
+		    {
+			// DefWindowProc needs the click position in screen
+			// coordinates via lParam; passing 0 makes the move
+			// loop jump the window to (0,0).
+			scr = s_pt;
+			ClientToScreen(hwnd, &scr);
+			ReleaseCapture();
+			SendMessage(s_hwnd, WM_NCLBUTTONDOWN,
+				(WPARAM)HTCAPTION,
+				MAKELPARAM(scr.x, scr.y));
+			return 0;
+		    }
+		}
 		SetCapture(hwnd);
 		s_hCursor = GetCursor(); // backup default cursor
 		break;
 	    }
+	case WM_LBUTTONDBLCLK:
+	    {
+		if (tabdrag_on)
+		{
+		    TCHITTESTINFO htinfo;
+		    int		  hit;
+		    POINT	  pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+
+		    // Double-click on a caption button: don't treat as drag.
+		    if (tabline_btn_at(hwnd, pt) >= 0)
+			return 0;
+
+		    htinfo.pt = pt;
+		    hit = TabCtrl_HitTest(hwnd, &htinfo);
+		    if (hit == -1 || TabCtrl_GetItemCount(hwnd) <= 1)
+		    {
+			// Toggle maximize, matching the caption double-click.
+			WPARAM cmd = IsZoomed(s_hwnd) ? SC_RESTORE : SC_MAXIMIZE;
+			PostMessage(s_hwnd, WM_SYSCOMMAND, cmd, 0);
+			return 0;
+		    }
+		}
+		break;
+	    }
 	case WM_MOUSEMOVE:
+	    if (tabdrag_on)
+	    {
+		POINT mpt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+		int   b = tabline_btn_at(hwnd, mpt);
+		if (b != tabline_hover_btn)
+		{
+		    tabline_hover_btn = b;
+		    InvalidateRect(hwnd, NULL, FALSE);
+		}
+		if (b >= 0)
+		{
+		    TRACKMOUSEEVENT tme;
+		    tme.cbSize = sizeof(tme);
+		    tme.dwFlags = TME_LEAVE;
+		    tme.hwndTrack = hwnd;
+		    tme.dwHoverTime = 0;
+		    TrackMouseEvent(&tme);
+		    return 0;
+		}
+	    }
 	    if (GetCapture() == hwnd
 		    && ((wParam & MK_LBUTTON)) != 0)
 	    {
@@ -8697,6 +9142,26 @@ tabline_wndproc(
 	    break;
 	case WM_LBUTTONUP:
 	    {
+		if (tabdrag_on && tabline_pressed_btn >= 0)
+		{
+		    POINT pt = {GET_X_LPARAM(lParam), GET_Y_LPARAM(lParam)};
+		    int   b = tabline_btn_at(hwnd, pt);
+		    int   pressed = tabline_pressed_btn;
+
+		    tabline_pressed_btn = -1;
+		    if (GetCapture() == hwnd)
+			ReleaseCapture();
+		    if (b == pressed)
+		    {
+			WPARAM cmd = SC_CLOSE;
+			if (pressed == TABLINE_BTN_MIN)
+			    cmd = SC_MINIMIZE;
+			else if (pressed == TABLINE_BTN_MAX)
+			    cmd = IsZoomed(s_hwnd) ? SC_RESTORE : SC_MAXIMIZE;
+			PostMessage(s_hwnd, WM_SYSCOMMAND, cmd, 0);
+		    }
+		    return 0;
+		}
 		if (GetCapture() == hwnd)
 		{
 		    SetCursor(s_hCursor);

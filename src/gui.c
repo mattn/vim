@@ -3517,6 +3517,9 @@ gui_init_which_components(char_u *oldval UNUSED)
 #if defined(FEAT_GUI_MSWIN) || defined(FEAT_GUI_GTK)
     static int	prev_fullscreen = FALSE;
     int		using_fullscreen = FALSE;
+
+    static int	prev_tabdrag = FALSE;
+    int		using_tabdrag = FALSE;
 #endif
 #if defined(FEAT_MENU)
     static int	prev_tearoff = -1;
@@ -3596,6 +3599,9 @@ gui_init_which_components(char_u *oldval UNUSED)
 	    case GO_FULLSCREEN:
 		using_fullscreen = TRUE;
 		break;
+	    case GO_TABDRAG:
+		using_tabdrag = TRUE;
+		break;
 #endif
 #ifdef FEAT_TOOLBAR
 	    case GO_TOOLBAR:
@@ -3631,6 +3637,12 @@ gui_init_which_components(char_u *oldval UNUSED)
     {
 	gui_mch_set_fullscreen(using_fullscreen);
 	prev_fullscreen = using_fullscreen;
+    }
+
+    if (using_tabdrag != prev_tabdrag)
+    {
+	gui_mch_set_tabdrag(using_tabdrag);
+	prev_tabdrag = using_tabdrag;
     }
 #endif
 
@@ -3781,7 +3793,8 @@ gui_init_which_components(char_u *oldval UNUSED)
     int
 gui_use_tabline(void)
 {
-    return gui.in_use && vim_strchr(p_go, GO_TABLINE) != NULL;
+    return gui.in_use && (vim_strchr(p_go, GO_TABLINE) != NULL
+			    || vim_strchr(p_go, GO_TABDRAG) != NULL);
 }
 
 /*
@@ -3791,8 +3804,13 @@ gui_use_tabline(void)
     static int
 gui_has_tabline(void)
 {
-    if (!gui_use_tabline()
-	    || p_stal == 0
+    if (!gui_use_tabline())
+	return FALSE;
+    // With 'E' (Windows Terminal-like mode) the tabline is always shown,
+    // because it doubles as the title bar drag area.
+    if (vim_strchr(p_go, GO_TABDRAG) != NULL)
+	return TRUE;
+    if (p_stal == 0
 	    || (p_stal == 1 && first_tabpage->tp_next == NULL))
 	return FALSE;
     return TRUE;
