@@ -877,6 +877,7 @@ OBJ = \
 	$(OUTDIR)/session.o \
 	$(OUTDIR)/sha256.o \
 	$(OUTDIR)/sign.o \
+	$(OUTDIR)/sixel.o \
 	$(OUTDIR)/spell.o \
 	$(OUTDIR)/spellfile.o \
 	$(OUTDIR)/spellsuggest.o \

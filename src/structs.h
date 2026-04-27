@@ -4225,6 +4225,13 @@ struct window_S
     char_u	*w_popup_mask_cells; // cached mask cells
     int		w_popup_mask_height; // height of w_popup_mask_cells
     int		w_popup_mask_width;  // width of w_popup_mask_cells
+
+# ifdef FEAT_SIXEL
+    char_u	*w_popup_image_data;	// RGB pixels (w*h*3)
+    int		w_popup_image_w;	// source pixel width
+    int		w_popup_image_h;	// source pixel height
+    char_u	*w_popup_image_seq;	// cached sixel DCS sequence
+# endif
 # if defined(FEAT_TIMERS)
     timer_T	*w_popup_timer;	    // timer for closing popup window
 # endif
@@ -5389,6 +5396,18 @@ struct cellsize {
     int cs_xpixel;
     int cs_ypixel;
 };
+#endif
+
+#if defined(FEAT_SIXEL) || defined(PROTO)
+// RGB image input for the sixel encoder.
+// "data" points to width*height*3 bytes of tightly packed R,G,B triples.
+// Sixel itself is paletted and cannot represent partial alpha, so any
+// transparency must be flattened by the caller before encoding.
+typedef struct {
+    char_u  *data;
+    int	     width;
+    int	     height;
+} sixel_image_T;
 #endif
 
 #ifdef FEAT_WAYLAND

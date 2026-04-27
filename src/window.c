@@ -6203,6 +6203,10 @@ win_free_popup(win_T *win)
     if (timer_valid(win->w_popup_timer))
 	stop_timer(win->w_popup_timer);
 # endif
+# ifdef FEAT_SIXEL
+    vim_free(win->w_popup_image_data);
+    vim_free(win->w_popup_image_seq);
+# endif
     vim_free(win->w_frame);
     win_free(win, NULL);
 }

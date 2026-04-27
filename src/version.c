@@ -535,6 +535,11 @@ static char *(features[]) =
 #else
 	"-sodium",
 #endif
+#ifdef FEAT_SIXEL
+	"+sixel",
+#else
+	"-sixel",
+#endif
 #ifdef FEAT_SOUND
 	"+sound",
 #else

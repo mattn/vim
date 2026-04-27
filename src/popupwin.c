@@ -837,6 +837,83 @@ apply_general_options(win_T *wp, dict_T *dict)
 	    semsg(_(e_invalid_value_for_argument_str_str), "close", tv_get_string(&di->di_tv));
     }
 
+#ifdef FEAT_SIXEL
+    di = dict_find(dict, (char_u *)"image", -1);
+    if (di != NULL && di->di_tv.v_type == VAR_DICT
+				    && di->di_tv.vval.v_dict != NULL)
+    {
+	dict_T	    *idict = di->di_tv.vval.v_dict;
+	dictitem_T  *id = dict_find(idict, (char_u *)"data", -1);
+	int	     iw = (int)dict_get_number(idict, "width");
+	int	     ih = (int)dict_get_number(idict, "height");
+
+	if (id != NULL && id->di_tv.v_type == VAR_BLOB
+				&& id->di_tv.vval.v_blob != NULL
+				&& iw > 0 && ih > 0)
+	{
+	    blob_T  *b = id->di_tv.vval.v_blob;
+	    long     blen = blob_len(b);
+
+	    if (blen == (long)iw * ih * 3)
+	    {
+		sixel_image_T	si;
+
+		VIM_CLEAR(wp->w_popup_image_data);
+		VIM_CLEAR(wp->w_popup_image_seq);
+		wp->w_popup_image_data = vim_memsave(b->bv_ga.ga_data,
+								(size_t)blen);
+		wp->w_popup_image_w = iw;
+		wp->w_popup_image_h = ih;
+		if (wp->w_popup_image_data != NULL)
+		{
+		    si.data = wp->w_popup_image_data;
+		    si.width = iw;
+		    si.height = ih;
+		    wp->w_popup_image_seq = sixel_encode(&si);
+
+		    // The image content has changed; schedule the popup
+		    // (and the area underneath) to be redrawn so the new
+		    // sixel sequence reaches the terminal.
+		    redraw_win_later(wp, UPD_NOT_VALID);
+		    if (must_redraw < UPD_VALID)
+			must_redraw = UPD_VALID;
+
+		    // Auto-size the popup cell box so the image fits.  Cell
+		    // pixel dimensions come from the terminal; if they are
+		    // unavailable, assume a typical 8x16 fallback.
+# if defined(UNIX) || defined(MSWIN) || defined(VMS) || defined(AMIGA)
+		    {
+			struct cellsize cs;
+			int		cx = 8, cy = 16;
+			int		cw, ch;
+
+			cs.cs_xpixel = -1;
+			cs.cs_ypixel = -1;
+#  ifdef UNIX
+			mch_calc_cell_size(&cs);
+#  endif
+			if (cs.cs_xpixel > 0 && cs.cs_ypixel > 0)
+			{
+			    cx = cs.cs_xpixel;
+			    cy = cs.cs_ypixel;
+			}
+			cw = (iw + cx - 1) / cx;
+			ch = (ih + cy - 1) / cy;
+			wp->w_minwidth = cw;
+			wp->w_maxwidth = cw;
+			wp->w_minheight = ch;
+			wp->w_maxheight = ch;
+		    }
+# endif
+		}
+	    }
+	    else
+		semsg(_(e_invalid_value_for_argument_str_str), "image",
+				"data length must equal width*height*3");
+	}
+    }
+#endif
+
     str = dict_get_string(dict, "highlight", FALSE);
     if (str != NULL)
     {
@@ -5099,6 +5176,28 @@ fill_opacity_padding(
 		    start_col, end_col);
 }
 
+#ifdef FEAT_SIXEL
+/*
+ * Emit the cached sixel sequence for a popup with an image attribute.
+ * Called after the popup's borders/text have been drawn for this redraw cycle.
+ */
+    static void
+popup_emit_image_sixel(win_T *wp)
+{
+    int row, col;
+
+    if (wp->w_popup_image_seq == NULL)
+	return;
+    row = wp->w_winrow + wp->w_popup_border[0] + wp->w_popup_padding[0];
+    col = wp->w_wincol + wp->w_popup_border[3] + wp->w_popup_padding[3];
+    if (row < 0 || col < 0)
+	return;
+    term_windgoto(row, col);
+    out_str(wp->w_popup_image_seq);
+    out_flush();
+}
+#endif
+
 /*
  * Update popup windows.  They are drawn on top of normal windows.
  * "win_update" is called for each popup window, lowest zindex first.
@@ -5690,6 +5789,10 @@ update_popups(void (*win_update)(win_T *wp))
 
 	// Back to the normal zindex.
 	screen_zindex = 0;
+
+#ifdef FEAT_SIXEL
+	popup_emit_image_sixel(wp);
+#endif
 
 #ifdef HAS_MESSAGE_WINDOW
 	// if this was the message window popup may start the timer now

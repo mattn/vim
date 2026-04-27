@@ -1554,6 +1554,7 @@ BASIC_SRC = \
 	session.c \
 	sha256.c \
 	sign.c \
+	sixel.c \
 	sound.c \
 	spell.c \
 	spellfile.c \
@@ -1732,6 +1733,7 @@ OBJ_COMMON = \
 	objects/session.o \
 	objects/sha256.o \
 	objects/sign.o \
+	objects/sixel.o \
 	objects/sound.o \
 	objects/spell.o \
 	objects/spellfile.o \
@@ -1937,6 +1939,7 @@ PROTO_FILES = \
 	proto/session.pro \
 	proto/sha256.pro \
 	proto/sign.pro \
+	proto/sixel.pro \
 	proto/sound.pro \
 	proto/spell.pro \
 	proto/spellfile.pro \
@@ -3564,6 +3567,9 @@ objects/sha256.o: sha256.c
 objects/sign.o: sign.c
 	$(CCC) -o $@ sign.c
 
+objects/sixel.o: sixel.c
+	$(CCC) -o $@ sixel.c
+
 objects/sound.o: sound.c
 	$(CCC) -o $@ sound.c
 
@@ -4239,6 +4245,11 @@ objects/sign.o: auto/osdef.h sign.c vim.h protodef.h auto/config.h feature.h os_
  structs.h regexp.h gui.h libvterm/include/vterm.h \
  libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
  globals.h errors.h
+objects/sixel.o: auto/osdef.h sixel.c vim.h protodef.h auto/config.h feature.h os_unix.h \
+ ascii.h keymap.h termdefs.h macros.h option.h beval.h \
+ structs.h regexp.h gui.h libvterm/include/vterm.h \
+ libvterm/include/vterm_keycodes.h alloc.h ex_cmds.h spell.h proto.h \
+ globals.h errors.h
 objects/sound.o: auto/osdef.h sound.c vim.h protodef.h auto/config.h feature.h os_unix.h \
  ascii.h keymap.h termdefs.h macros.h option.h beval.h \
  structs.h regexp.h gui.h libvterm/include/vterm.h \
@@ -4755,6 +4766,7 @@ proto/search.pro: search.c
 proto/session.pro: session.c
 proto/sha256.pro: sha256.c
 proto/sign.pro: sign.c
+proto/sixel.pro: sixel.c
 proto/sound.pro: sound.c
 proto/spell.pro: spell.c
 proto/spellfile.pro: spellfile.c

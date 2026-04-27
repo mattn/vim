@@ -169,6 +169,7 @@ SRC += \
 	session.c \
 	sha256.c \
 	sign.c \
+	sixel.c \
 	spell.c \
 	spellfile.c \
 	spellsuggest.c \

@@ -1087,6 +1087,13 @@
 #endif
 
 /*
+ * +sixel	RGB image rendering via DEC sixel sequences (popup image).
+ */
+#if defined(FEAT_HUGE) && defined(FEAT_PROP_POPUP)
+# define FEAT_SIXEL
+#endif
+
+/*
  * +message_window	use a popup for messages when 'cmdheight' is zero
  */
 #if defined(FEAT_PROP_POPUP) && defined(FEAT_TIMERS)

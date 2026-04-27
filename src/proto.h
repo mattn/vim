@@ -211,6 +211,9 @@ void mbyte_im_set_active(int active_arg);
 #  include "popupwin.pro"
 #  include "textprop.pro"
 # endif
+# ifdef FEAT_SIXEL
+#  include "sixel.pro"
+# endif
 # include "testing.pro"
 # include "textobject.pro"
 # include "textformat.pro"
