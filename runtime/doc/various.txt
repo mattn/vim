@@ -391,6 +391,7 @@ T  *+comments*		'comments' support
 N  *+conceal*		"conceal" support, see |conceal| |:syn-conceal| etc.
 N  *+cryptv*		encryption support |encryption|
 H  *+cscope*		|cscope| support
+H  *+curl*		libcurl support, |curl_request()|
 T  *+cursorbind*	'cursorbind' support
 m  *+cursorshape*	|termcap-cursor-shape| support
 m  *+debug*		Compiled for debugging.

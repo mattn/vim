@@ -152,6 +152,8 @@ count({comp}, {expr} [, {ic} [, {start}]])
 				Number	count how many {expr} are in {comp}
 cscope_connection([{num}, {dbpath} [, {prepend}]])
 				Number	checks existence of cscope connection
+curl_request({url} [, {options}])
+				Dict	perform an HTTP request via libcurl
 cursor({lnum}, {col} [, {off}])
 				Number	move cursor to {lnum}, {col}, {off}
 cursor({list})			Number	move cursor to position in {list}
@@ -2291,6 +2293,71 @@ cscope_connection([{num} , {dbpath} [, {prepend}]])	*cscope_connection()*
 		cscope_connection(4, "cscope.out", "/usr/local")	1
 <
 		Return type: |Number|
+
+
+curl_request({url} [, {options}])			*curl_request()*
+		Perform an HTTP request to {url} using libcurl and return the
+		response as a |Dictionary|.
+
+		{options} is an optional |Dictionary| with these entries:
+		    method	HTTP method, one of "GET" (default), "POST",
+				"PUT", "DELETE", "PATCH", "HEAD" or any custom
+				method string.
+		    headers	|Dictionary| of request headers.  Each key is
+				the header name and each value is its content.
+		    body	Request body |String| (used with POST/PUT/etc.).
+		    timeout	Request timeout in seconds (default 30).
+		    mode	Response body type, one of "string" (default)
+				or "blob".  Use "blob" to receive binary
+				responses (images, archives, ...) without
+				NUL-byte truncation.
+		    callback	A |Funcref|, |lambda| or function name.  When
+				present the request runs asynchronously: the
+				function returns 0 immediately and the callback
+				is invoked with the response Dict once the
+				request finishes.
+
+		The synchronous return value (or the argument passed to the
+		async callback) is a |Dictionary| with these entries:
+		    status	HTTP status code as a |Number| (0 on transport
+				error).
+		    body	Response body |String|, or |Blob| when "mode"
+				was set to "blob".
+		    headers	|Dictionary| of response headers.  Header names
+				are lowercased; if the same header appears
+				multiple times only the first occurrence is
+				kept.
+		    error	Present only on transport error (async mode);
+				the libcurl error message |String|.
+
+		Synchronous example: >
+		    let res = curl_request('https://example.com')
+		    echo res.status
+		    echo res.body
+<
+		POST with JSON body and custom headers: >
+		    call curl_request('https://api.example.com/v1/items', {
+		        \ 'method': 'POST',
+		        \ 'headers': {'Content-Type': 'application/json'},
+		        \ 'body': json_encode({'name': 'foo'}),
+		        \ })
+<
+		Asynchronous example: >
+		    func! OnDone(res)
+		      echo 'status:' a:res.status
+		    endfunc
+		    call curl_request('https://example.com',
+		        \ {'callback': function('OnDone')})
+<
+		Binary response (Blob) example: >
+		    let res = curl_request('https://example.com/img.png',
+		        \ {'mode': 'blob'})
+		    call writefile(res.body, 'img.png')
+<
+		{Vi does not have this feature}
+		{only available when compiled with the |+curl| feature}
+
+		Return type: dict<any>
 
 
 cursor({lnum}, {col} [, {off}])				*cursor()*
@@ -13224,6 +13291,7 @@ compatible		Compiled to be very Vi compatible.
 conpty			Platform where |ConPTY| can be used.
 cryptv			Compiled with encryption support |encryption|.
 cscope			Compiled with |cscope| support.
+curl			Compiled with libcurl support |curl_request()|.
 cursorbind		Compiled with 'cursorbind' (always true)
 debug			Compiled with "DEBUG" defined.
 dialog_con		Compiled with console dialog support.

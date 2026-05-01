@@ -1439,6 +1439,7 @@ $quote	eval.txt	/*$quote*
 +conceal	various.txt	/*+conceal*
 +cryptv	various.txt	/*+cryptv*
 +cscope	various.txt	/*+cscope*
++curl	various.txt	/*+curl*
 +cursorbind	various.txt	/*+cursorbind*
 +cursorshape	various.txt	/*+cursorshape*
 +debug	various.txt	/*+debug*
@@ -6983,6 +6984,7 @@ ctags-gone	version6.txt	/*ctags-gone*
 cterm-colors	syntax.txt	/*cterm-colors*
 ctrl	intro.txt	/*ctrl*
 ctype-variable	eval.txt	/*ctype-variable*
+curl_request()	builtin.txt	/*curl_request()*
 curly-braces-function-names	eval.txt	/*curly-braces-function-names*
 curly-braces-names	eval.txt	/*curly-braces-names*
 curpos-visual	version6.txt	/*curpos-visual*

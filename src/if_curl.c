@@ -172,6 +172,7 @@ struct curl_async_S
     curl_buffer_T   ca_body;		// response body buffer
     curl_buffer_T   ca_headers;		// response header buffer
     struct curl_slist *ca_req_headers;	// request headers (to free later)
+    int		    ca_as_blob;		// return body as Blob instead of String
 };
 
 static curl_async_T	*first_curl_async = NULL;
@@ -327,11 +328,60 @@ curl_ensure_init(void)
 }
 
 /*
+ * Add a "body" entry to "result".  When "as_blob" is TRUE the body is added
+ * as a Blob preserving the raw byte length (NUL bytes are kept); otherwise
+ * it is added as a String.
+ */
+    static void
+curl_add_body(dict_T *result, curl_buffer_T *body_buf, int as_blob)
+{
+    blob_T	*blob;
+    dictitem_T	*item;
+
+    if (!as_blob)
+    {
+	if (body_buf->data != NULL)
+	    dict_add_string(result, "body", body_buf->data);
+	else
+	    dict_add_string(result, "body", (char_u *)"");
+	return;
+    }
+
+    blob = blob_alloc();
+    if (blob == NULL)
+	return;
+    if (body_buf->data != NULL && body_buf->len > 0)
+    {
+	if (ga_grow(&blob->bv_ga, (int)body_buf->len) == FAIL)
+	{
+	    blob_free(blob);
+	    return;
+	}
+	mch_memmove(blob->bv_ga.ga_data, body_buf->data, body_buf->len);
+	blob->bv_ga.ga_len = (int)body_buf->len;
+    }
+    item = dictitem_alloc((char_u *)"body");
+    if (item == NULL)
+    {
+	blob_free(blob);
+	return;
+    }
+    item->di_tv.v_type = VAR_BLOB;
+    item->di_tv.vval.v_blob = blob;
+    ++blob->bv_refcount;
+    if (dict_add(result, item) == FAIL)
+    {
+	dictitem_free(item);
+	blob_free(blob);
+    }
+}
+
+/*
  * Build a response dict from curl result.
  */
     static dict_T *
 curl_build_response(CURL *curl, curl_buffer_T *body_buf,
-						    curl_buffer_T *hdr_buf)
+				curl_buffer_T *hdr_buf, int as_blob)
 {
     dict_T	*result;
     dict_T	*hdr_dict;
@@ -344,10 +394,7 @@ curl_build_response(CURL *curl, curl_buffer_T *body_buf,
     curl_easy_getinfo(curl, CURLINFO_RESPONSE_CODE, &status_code);
     dict_add_number(result, "status", (varnumber_T)status_code);
 
-    if (body_buf->data != NULL)
-	dict_add_string(result, "body", body_buf->data);
-    else
-	dict_add_string(result, "body", (char_u *)"");
+    curl_add_body(result, body_buf, as_blob);
 
     hdr_dict = curl_parse_headers(hdr_buf);
     if (hdr_dict != NULL)
@@ -519,7 +566,7 @@ curl_async_process(void)
 		typval_T    argv[2];
 
 		result = curl_build_response(easy, &ca->ca_body,
-							    &ca->ca_headers);
+					    &ca->ca_headers, ca->ca_as_blob);
 		if (result != NULL)
 		{
 		    typval_T    rettv;
@@ -543,9 +590,11 @@ curl_async_process(void)
 		{
 		    typval_T    argv[2];
 		    typval_T    rettv;
+		    curl_buffer_T empty_buf;
 
+		    CLEAR_FIELD(empty_buf);
 		    dict_add_number(result, "status", 0);
-		    dict_add_string(result, "body", (char_u *)"");
+		    curl_add_body(result, &empty_buf, ca->ca_as_blob);
 		    dict_add_string(result, "error",
 			(char_u *)curl_easy_strerror(msg->data.result));
 
@@ -587,6 +636,7 @@ f_curl_request(typval_T *argvars, typval_T *rettv)
     struct curl_slist *req_headers;
     callback_T	    callback;
     int		    is_async = FALSE;
+    int		    as_blob = FALSE;
 
     CLEAR_FIELD(callback);
 
@@ -607,7 +657,7 @@ f_curl_request(typval_T *argvars, typval_T *rettv)
 	return;
     }
 
-    // Check for async callback.
+    // Check for async callback and body mode.
     if (opts != NULL)
     {
 	dictitem_T  *di = dict_find(opts, (char_u *)"callback", -1);
@@ -616,6 +666,22 @@ f_curl_request(typval_T *argvars, typval_T *rettv)
 	    callback = get_callback(&di->di_tv);
 	    if (callback.cb_name != NULL)
 		is_async = TRUE;
+	}
+
+	di = dict_find(opts, (char_u *)"mode", -1);
+	if (di != NULL)
+	{
+	    char_u  *mode = tv_get_string(&di->di_tv);
+
+	    if (STRCMP(mode, "blob") == 0)
+		as_blob = TRUE;
+	    else if (STRCMP(mode, "string") != 0)
+	    {
+		semsg(_(e_invalid_argument_str), mode);
+		if (callback.cb_name != NULL)
+		    free_callback(&callback);
+		return;
+	    }
 	}
     }
 
@@ -648,6 +714,7 @@ f_curl_request(typval_T *argvars, typval_T *rettv)
 
 	ca->ca_curl = curl;
 	set_callback(&ca->ca_callback, &callback);
+	ca->ca_as_blob = as_blob;
 	req_headers = curl_setup_easy(curl, url, opts,
 						&ca->ca_body, &ca->ca_headers);
 	ca->ca_req_headers = req_headers;
@@ -701,7 +768,7 @@ f_curl_request(typval_T *argvars, typval_T *rettv)
 	}
 	else
 	{
-	    result = curl_build_response(curl, &body_buf, &hdr_buf);
+	    result = curl_build_response(curl, &body_buf, &hdr_buf, as_blob);
 	    if (result != NULL)
 	    {
 		rettv->vval.v_dict = result;
