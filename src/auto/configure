@@ -1549,7 +1549,8 @@ Optional Features:
   --disable-desktop-database-update  update disabled
   --disable-largefile     omit support for large files
   --disable-canberra      Do not use libcanberra.
-  --disable-libcurl        Do not use libcurl.
+  --enable-libcurl[=OPTS]  Enable libcurl interface (default: yes for huge
+                           features). OPTS=dynamic to load libcurl at runtime.
   --disable-libsodium      Do not use libsodium.
   --disable-acl           No check for ACL support.
   --enable-gpm=OPTS       Use gpm (Linux mouse daemon). default=yes OPTS=yes/no/dynamic
@@ -14760,7 +14761,7 @@ else
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $enable_libcurl" >&5
 printf "%s\n" "$enable_libcurl" >&6; }
 fi
-if test "$enable_libcurl" = "yes"; then
+if test "$enable_libcurl" = "yes" -o "$enable_libcurl" = "dynamic"; then
   if test "x$PKG_CONFIG" != "xno"; then
     libcurl_lib=`$PKG_CONFIG --libs libcurl 2>/dev/null`
     libcurl_cppflags=`$PKG_CONFIG --cflags-only-I libcurl 2>/dev/null`
@@ -14798,6 +14799,12 @@ then :
   { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
 printf "%s\n" "yes" >&6; }; printf "%s\n" "#define HAVE_CURL 1" >>confdefs.h
 
+        if test "$enable_libcurl" = "dynamic"; then
+          printf "%s\n" "#define DYNAMIC_CURL 1" >>confdefs.h
+
+          CFLAGS="$CFLAGS -DDYNAMIC_CURL_DLL=\\\"libcurl.so.4\\\""
+          LIBS="$ac_save_LIBS"
+        fi
 else case e in #(
   e) { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no; try installing libcurl-dev" >&5
 printf "%s\n" "no; try installing libcurl-dev" >&6; }; CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS"; CPPFLAGS="$ac_save_CPPFLAGS" ;;

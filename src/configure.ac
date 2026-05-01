@@ -3909,7 +3909,7 @@ fi
 
 AC_MSG_CHECKING(--enable-libcurl argument)
 AC_ARG_ENABLE(libcurl,
-	[  --disable-libcurl        Do not use libcurl.],
+	[  --enable-libcurl[=OPTS]  Enable libcurl interface (default: yes for huge features).  OPTS=dynamic to load libcurl at runtime.],
 	, [enable_libcurl="maybe"])
 
 if test "$enable_libcurl" = "maybe"; then
@@ -3923,7 +3923,7 @@ if test "$enable_libcurl" = "maybe"; then
 else
   AC_MSG_RESULT($enable_libcurl)
 fi
-if test "$enable_libcurl" = "yes"; then
+if test "$enable_libcurl" = "yes" -o "$enable_libcurl" = "dynamic"; then
   if test "x$PKG_CONFIG" != "xno"; then
     libcurl_lib=`$PKG_CONFIG --libs libcurl 2>/dev/null`
     libcurl_cppflags=`$PKG_CONFIG --cflags-only-I libcurl 2>/dev/null`
@@ -3945,8 +3945,13 @@ if test "$enable_libcurl" = "yes"; then
   # include <curl/curl.h>
       ], [
      curl_global_init(CURL_GLOBAL_DEFAULT); ])],
-       AC_MSG_RESULT(yes); AC_DEFINE(HAVE_CURL),
-       AC_MSG_RESULT(no; try installing libcurl-dev); CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS"; CPPFLAGS="$ac_save_CPPFLAGS")
+       [AC_MSG_RESULT(yes); AC_DEFINE(HAVE_CURL)
+        if test "$enable_libcurl" = "dynamic"; then
+          AC_DEFINE(DYNAMIC_CURL)
+          CFLAGS="$CFLAGS -DDYNAMIC_CURL_DLL=\\\"libcurl.so.4\\\""
+          LIBS="$ac_save_LIBS"
+        fi],
+       [AC_MSG_RESULT(no; try installing libcurl-dev); CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS"; CPPFLAGS="$ac_save_CPPFLAGS"])
 fi
 
 AC_MSG_CHECKING(--enable-libsodium argument)

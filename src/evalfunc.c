@@ -6927,7 +6927,7 @@ f_has(typval_T *argvars, typval_T *rettv)
 #endif
 		},
 	{"curl",
-#ifdef FEAT_CURL
+#if defined(FEAT_CURL) && !defined(DYNAMIC_CURL)
 		1
 #else
 		0
@@ -7964,6 +7964,10 @@ f_has(typval_T *argvars, typval_T *rettv)
 #if defined(USE_ICONV) && defined(DYNAMIC_ICONV)
 	    else if (STRICMP(name, "iconv") == 0)
 		n = iconv_enabled(FALSE);
+#endif
+#ifdef DYNAMIC_CURL
+	    else if (STRICMP(name, "curl") == 0)
+		n = curl_enabled(FALSE);
 #endif
 #ifdef DYNAMIC_LUA
 	    else if (STRICMP(name, "lua") == 0)

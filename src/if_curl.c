@@ -15,7 +15,142 @@
 
 #if defined(FEAT_CURL) || defined(PROTO)
 
+#ifdef DYNAMIC_CURL
+// curl/typecheck-gcc.h redefines curl_easy_setopt/getinfo as macros, which
+// would clash with our function-pointer redirection below.
+# define CURL_DISABLE_TYPECHECK
+#endif
 #include <curl/curl.h>
+
+#ifdef DYNAMIC_CURL
+// curl.h still leaves identity placeholder macros for these when typecheck is
+// disabled; undef them so our dll_* redirection takes effect.
+# undef curl_easy_setopt
+# undef curl_easy_getinfo
+
+# ifdef MSWIN
+#  define load_dll vimLoadLib
+#  define symbol_from_dll GetProcAddress
+#  define close_dll FreeLibrary
+#  define load_dll_error GetWin32Error
+# else
+#  include <dlfcn.h>
+#  define HANDLE void*
+#  define load_dll(n) dlopen((n), RTLD_LAZY|RTLD_GLOBAL)
+#  define symbol_from_dll dlsym
+#  define close_dll dlclose
+#  define load_dll_error dlerror
+# endif
+
+# define curl_global_init dll_curl_global_init
+# define curl_global_cleanup dll_curl_global_cleanup
+# define curl_easy_init dll_curl_easy_init
+# define curl_easy_cleanup dll_curl_easy_cleanup
+# define curl_easy_setopt dll_curl_easy_setopt
+# define curl_easy_perform dll_curl_easy_perform
+# define curl_easy_getinfo dll_curl_easy_getinfo
+# define curl_easy_strerror dll_curl_easy_strerror
+# define curl_multi_init dll_curl_multi_init
+# define curl_multi_cleanup dll_curl_multi_cleanup
+# define curl_multi_add_handle dll_curl_multi_add_handle
+# define curl_multi_remove_handle dll_curl_multi_remove_handle
+# define curl_multi_perform dll_curl_multi_perform
+# define curl_multi_info_read dll_curl_multi_info_read
+# define curl_slist_append dll_curl_slist_append
+# define curl_slist_free_all dll_curl_slist_free_all
+
+static CURLcode (*dll_curl_global_init)(long flags);
+static void (*dll_curl_global_cleanup)(void);
+static CURL *(*dll_curl_easy_init)(void);
+static void (*dll_curl_easy_cleanup)(CURL *handle);
+static CURLcode (*dll_curl_easy_setopt)(CURL *handle, CURLoption option, ...);
+static CURLcode (*dll_curl_easy_perform)(CURL *handle);
+static CURLcode (*dll_curl_easy_getinfo)(CURL *handle, CURLINFO info, ...);
+static const char *(*dll_curl_easy_strerror)(CURLcode error);
+static CURLM *(*dll_curl_multi_init)(void);
+static CURLMcode (*dll_curl_multi_cleanup)(CURLM *multi_handle);
+static CURLMcode (*dll_curl_multi_add_handle)(CURLM *multi_handle,
+							    CURL *easy_handle);
+static CURLMcode (*dll_curl_multi_remove_handle)(CURLM *multi_handle,
+							    CURL *easy_handle);
+static CURLMcode (*dll_curl_multi_perform)(CURLM *multi_handle,
+							    int *running_handles);
+static CURLMsg *(*dll_curl_multi_info_read)(CURLM *multi_handle,
+							    int *msgs_in_queue);
+static struct curl_slist *(*dll_curl_slist_append)(struct curl_slist *list,
+							    const char *string);
+static void (*dll_curl_slist_free_all)(struct curl_slist *list);
+
+static struct {
+    const char	*name;
+    void	**ptr;
+} curl_funcname_table[] = {
+    {"curl_global_init",	(void **)&dll_curl_global_init},
+    {"curl_global_cleanup",	(void **)&dll_curl_global_cleanup},
+    {"curl_easy_init",		(void **)&dll_curl_easy_init},
+    {"curl_easy_cleanup",	(void **)&dll_curl_easy_cleanup},
+    {"curl_easy_setopt",	(void **)&dll_curl_easy_setopt},
+    {"curl_easy_perform",	(void **)&dll_curl_easy_perform},
+    {"curl_easy_getinfo",	(void **)&dll_curl_easy_getinfo},
+    {"curl_easy_strerror",	(void **)&dll_curl_easy_strerror},
+    {"curl_multi_init",		(void **)&dll_curl_multi_init},
+    {"curl_multi_cleanup",	(void **)&dll_curl_multi_cleanup},
+    {"curl_multi_add_handle",	(void **)&dll_curl_multi_add_handle},
+    {"curl_multi_remove_handle",(void **)&dll_curl_multi_remove_handle},
+    {"curl_multi_perform",	(void **)&dll_curl_multi_perform},
+    {"curl_multi_info_read",	(void **)&dll_curl_multi_info_read},
+    {"curl_slist_append",	(void **)&dll_curl_slist_append},
+    {"curl_slist_free_all",	(void **)&dll_curl_slist_free_all},
+    {NULL,			NULL}
+};
+
+static HANDLE hinstCurl = NULL;
+
+/*
+ * Load libcurl at runtime and resolve the symbols we use.
+ * Return OK on success or FAIL on error.
+ */
+    static int
+curl_runtime_link_init(char *libname, int verbose)
+{
+    int	    i;
+
+    if (hinstCurl != NULL)
+	return OK;
+    hinstCurl = load_dll(libname);
+    if (hinstCurl == NULL)
+    {
+	if (verbose)
+	    semsg(_(e_could_not_load_library_str_str),
+						    libname, load_dll_error());
+	return FAIL;
+    }
+    for (i = 0; curl_funcname_table[i].name != NULL; ++i)
+    {
+	*curl_funcname_table[i].ptr = symbol_from_dll(hinstCurl,
+						curl_funcname_table[i].name);
+	if (*curl_funcname_table[i].ptr == NULL)
+	{
+	    close_dll(hinstCurl);
+	    hinstCurl = NULL;
+	    if (verbose)
+		semsg(_(e_could_not_load_library_function_str),
+						curl_funcname_table[i].name);
+	    return FAIL;
+	}
+    }
+    return OK;
+}
+
+/*
+ * Return TRUE if libcurl is available at runtime.
+ */
+    int
+curl_enabled(int verbose)
+{
+    return curl_runtime_link_init((char *)DYNAMIC_CURL_DLL, verbose) == OK;
+}
+#endif // DYNAMIC_CURL
 
 typedef struct
 {
@@ -162,16 +297,21 @@ curl_parse_headers(curl_buffer_T *hdrbuf)
 static int curl_initialized = FALSE;
 
 /*
- * Ensure libcurl global state is initialized.
+ * Ensure libcurl is loaded (when dynamic) and global state is initialized.
+ * Return OK on success or FAIL when libcurl is unavailable.
  */
-    static void
+    static int
 curl_ensure_init(void)
 {
-    if (!curl_initialized)
-    {
-	curl_global_init(CURL_GLOBAL_DEFAULT);
-	curl_initialized = TRUE;
-    }
+    if (curl_initialized)
+	return OK;
+#ifdef DYNAMIC_CURL
+    if (!curl_enabled(TRUE))
+	return FAIL;
+#endif
+    curl_global_init(CURL_GLOBAL_DEFAULT);
+    curl_initialized = TRUE;
+    return OK;
 }
 
 /*
@@ -467,7 +607,12 @@ f_curl_request(typval_T *argvars, typval_T *rettv)
 	}
     }
 
-    curl_ensure_init();
+    if (curl_ensure_init() == FAIL)
+    {
+	if (callback.cb_name != NULL)
+	    free_callback(&callback);
+	return;
+    }
 
     curl = curl_easy_init();
     if (curl == NULL)
