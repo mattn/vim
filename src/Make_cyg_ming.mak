@@ -318,6 +318,19 @@ LUA_LIB = -L$(LUA_LIBDIR) -llua
 
 endif
 
+#	libcurl interface:
+#	  CURL=[Path to curl directory]
+#	  DYNAMIC_CURL=yes (to load the curl DLL dynamically; default)
+ifdef CURL
+ ifndef DYNAMIC_CURL
+DYNAMIC_CURL=yes
+ endif
+
+ ifeq (no,$(DYNAMIC_CURL))
+CURL_LIB = -L$(CURL)/lib -lcurl
+ endif
+endif
+
 #	MzScheme interface:
 #	  MZSCHEME=[Path to MzScheme directory] (Set inside Make_cyg.mak or Make_ming.mak)
 #	  DYNAMIC_MZSCHEME=yes (to load the MzScheme DLL dynamically)
@@ -584,6 +597,13 @@ LUA_INCDIR = $(LUA)/include
 CFLAGS += -I$(LUA_INCDIR) -I$(LUA) -DFEAT_LUA
  ifeq (yes, $(DYNAMIC_LUA))
 CFLAGS += -DDYNAMIC_LUA -DDYNAMIC_LUA_DLL=\"lua$(LUA_VER).dll\"
+ endif
+endif
+
+ifdef CURL
+CFLAGS += -I$(CURL)/include -DHAVE_CURL
+ ifeq (yes, $(DYNAMIC_CURL))
+CFLAGS += -DDYNAMIC_CURL -DDYNAMIC_CURL_DLL=\"libcurl.dll\"
  endif
 endif
 
@@ -925,6 +945,9 @@ endif
 ifdef LUA
 OBJ += $(OUTDIR)/if_lua.o
 endif
+ifdef CURL
+OBJ += $(OUTDIR)/if_curl.o
+endif
 ifdef MZSCHEME
 OBJ += $(OUTDIR)/if_mzsch.o
 MZSCHEME_INCL = if_mzsch.h
@@ -1186,7 +1209,7 @@ EXEENTRYG = -Wl,--entry=_wWinMainCRTStartup@0
  endif
 
 $(TARGET): $(OBJ)
-	$(LINK) $(CFLAGS) $(LFLAGS) -o $@ $(OBJ) $(LIB) -lole32 -luuid -lgdi32 $(LUA_LIB) $(MZSCHEME_LIBDIR) $(MZSCHEME_LIB) $(PYTHONLIB) $(PYTHON3LIB) $(RUBYLIB) $(SODIUMLIB)
+	$(LINK) $(CFLAGS) $(LFLAGS) -o $@ $(OBJ) $(LIB) -lole32 -luuid -lgdi32 $(LUA_LIB) $(MZSCHEME_LIBDIR) $(MZSCHEME_LIB) $(PYTHONLIB) $(PYTHON3LIB) $(RUBYLIB) $(SODIUMLIB) $(CURL_LIB)
 
 $(GVIMEXE): $(EXEOBJG) $(VIMDLLBASE).dll
 	$(CC) -L. $(EXELFLAGS) -mwindows -o $@ $(EXEOBJG) -l$(VIMDLLBASE) $(EXEENTRYG)
@@ -1195,7 +1218,7 @@ $(VIMEXE): $(EXEOBJC) $(VIMDLLBASE).dll
 	$(CC) -L. $(EXELFLAGS) -o $@ $(EXEOBJC) -l$(VIMDLLBASE) $(EXEENTRYC)
 else
 $(TARGET): $(OBJ)
-	$(LINK) $(CFLAGS) $(LFLAGS) -o $@ $(OBJ) $(LIB) -lole32 -luuid $(LUA_LIB) $(MZSCHEME_LIBDIR) $(MZSCHEME_LIB) $(PYTHONLIB) $(PYTHON3LIB) $(RUBYLIB) $(SODIUMLIB)
+	$(LINK) $(CFLAGS) $(LFLAGS) -o $@ $(OBJ) $(LIB) -lole32 -luuid $(LUA_LIB) $(MZSCHEME_LIBDIR) $(MZSCHEME_LIB) $(PYTHONLIB) $(PYTHON3LIB) $(RUBYLIB) $(SODIUMLIB) $(CURL_LIB)
 endif
 
 upx: exes
@@ -1365,6 +1388,9 @@ $(OUTDIR)/gui_w32.o:	gui_w32.c $(INCL) $(GUI_INCL) version.h
 
 $(OUTDIR)/if_cscope.o:	if_cscope.c $(INCL)
 	$(CC) -c $(CFLAGS) if_cscope.c -o $@
+
+$(OUTDIR)/if_curl.o:	if_curl.c $(INCL)
+	$(CC) -c $(CFLAGS) if_curl.c -o $@
 
 $(OUTDIR)/if_lua.o:	if_lua.c $(INCL)
 	$(CC) -c $(CFLAGS:-fno-asynchronous-unwind-tables=) if_lua.c -o $@

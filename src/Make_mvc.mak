@@ -57,6 +57,10 @@
 #	  DYNAMIC_LUA=yes (to load the Lua DLL dynamically)
 #	  LUA_VER=[Lua version]  (default is 53)
 #
+#	libcurl interface:
+#	  CURL=[Path to curl directory]
+#	  DYNAMIC_CURL=yes (to load the curl DLL dynamically)
+#
 #	MzScheme interface:
 #	  MZSCHEME=[Path to MzScheme directory]
 #	  DYNAMIC_MZSCHEME=yes (to load the MzScheme DLLs dynamically)
@@ -232,6 +236,9 @@ OBJDIR = $(OBJDIR)O
 !ENDIF
 !IFDEF LUA
 OBJDIR = $(OBJDIR)U
+!ENDIF
+!IFDEF CURL
+OBJDIR = $(OBJDIR)C
 !ENDIF
 !IFDEF PERL
 OBJDIR = $(OBJDIR)L
@@ -969,6 +976,24 @@ LUA_LIB = "$(LUA)\lib\lua$(LUA_VER).lib"
 ! ENDIF
 !ENDIF
 
+# libcurl interface
+!IFDEF CURL
+! MESSAGE libcurl requested - root dir is "$(CURL)"
+! IF "$(DYNAMIC_CURL)" == "yes"
+!  MESSAGE libcurl DLL will be loaded dynamically
+! ENDIF
+CFLAGS = $(CFLAGS) -DHAVE_CURL
+CURL_OBJ = $(OUTDIR)\if_curl.obj
+CURL_INC = /I "$(CURL)\include"
+! IF "$(DYNAMIC_CURL)" == "yes"
+CFLAGS = $(CFLAGS) -DDYNAMIC_CURL \
+		-DDYNAMIC_CURL_DLL=\"libcurl.dll\"
+CURL_LIB =
+! ELSE
+CURL_LIB = "$(CURL)\lib\libcurl.lib"
+! ENDIF
+!ENDIF
+
 !IF defined(PYTHON) && defined(PYTHON3)
 DYNAMIC_PYTHON = yes
 DYNAMIC_PYTHON3 = yes
@@ -1246,7 +1271,7 @@ LINKARGS1 = /nologo
 LINKARGS2 = $(CON_LIB) $(GUI_LIB) $(LIBC) $(OLE_LIB) \
 	$(LUA_LIB) $(MZSCHEME_LIB) $(PERL_LIB) $(PYTHON_LIB) \
 	$(PYTHON3_LIB) $(RUBY_LIB) $(TCL_LIB) $(SOUND_LIB) \
-	$(NETBEANS_LIB) $(XPM_LIB) $(SOD_LIB) $(LINK_PDB)
+	$(NETBEANS_LIB) $(XPM_LIB) $(SOD_LIB) $(CURL_LIB) $(LINK_PDB)
 
 !IFDEF NODEBUG
 # Add /opt:ref to remove unreferenced functions and data even when /DEBUG is
@@ -1310,13 +1335,13 @@ $(VIMDLLBASE).dll: $(OUTDIR) $(OBJ) $(XDIFF_OBJ) $(GUI_OBJ) $(CUI_OBJ) \
 		$(OLE_OBJ) $(OLE_IDL) $(MZSCHEME_OBJ) $(LUA_OBJ) $(PERL_OBJ) \
 		$(PYTHON_OBJ) $(PYTHON3_OBJ) $(RUBY_OBJ) $(TCL_OBJ) \
 		$(TERM_OBJ) $(SOUND_OBJ) $(NETBEANS_OBJ) $(CHANNEL_OBJ) \
-		$(XPM_OBJ) version.c version.h
+		$(XPM_OBJ) $(CURL_OBJ) version.c version.h
 	$(CC) $(CFLAGS_OUTDIR) version.c
 	$(LINK) @<<
 $(LINKARGS1) /dll -out:$(VIMDLLBASE).dll $(OBJ) $(XDIFF_OBJ)
 $(GUI_OBJ) $(CUI_OBJ) $(OLE_OBJ) $(LUA_OBJ) $(MZSCHEME_OBJ) $(PERL_OBJ)
 $(PYTHON_OBJ) $(PYTHON3_OBJ) $(RUBY_OBJ) $(TCL_OBJ) $(TERM_OBJ) $(SOUND_OBJ)
-$(NETBEANS_OBJ) $(CHANNEL_OBJ) $(XPM_OBJ) $(OUTDIR)\version.obj $(LINKARGS2)
+$(NETBEANS_OBJ) $(CHANNEL_OBJ) $(XPM_OBJ) $(CURL_OBJ) $(OUTDIR)\version.obj $(LINKARGS2)
 <<
 
 $(GVIM).exe: $(OUTDIR) $(EXEOBJG) $(VIMDLLBASE).dll
@@ -1333,13 +1358,13 @@ $(VIM).exe: $(OUTDIR) $(OBJ) $(XDIFF_OBJ) $(GUI_OBJ) $(CUI_OBJ) \
 		$(OLE_OBJ) $(OLE_IDL) $(MZSCHEME_OBJ) $(LUA_OBJ) $(PERL_OBJ) \
 		$(PYTHON_OBJ) $(PYTHON3_OBJ) $(RUBY_OBJ) $(TCL_OBJ) \
 		$(TERM_OBJ) $(SOUND_OBJ) $(NETBEANS_OBJ) $(CHANNEL_OBJ) \
-		$(XPM_OBJ) version.c version.h
+		$(XPM_OBJ) $(CURL_OBJ) version.c version.h
 	$(CC) $(CFLAGS_OUTDIR) version.c
 	$(LINK) @<<
 $(LINKARGS1) /subsystem:$(SUBSYSTEM) -out:$(VIM).exe $(OBJ) $(XDIFF_OBJ)
 $(GUI_OBJ) $(CUI_OBJ) $(OLE_OBJ) $(LUA_OBJ) $(MZSCHEME_OBJ) $(PERL_OBJ)
 $(PYTHON_OBJ) $(PYTHON3_OBJ) $(RUBY_OBJ) $(TCL_OBJ) $(TERM_OBJ) $(SOUND_OBJ)
-$(NETBEANS_OBJ) $(CHANNEL_OBJ) $(XPM_OBJ) $(OUTDIR)\version.obj $(LINKARGS2)
+$(NETBEANS_OBJ) $(CHANNEL_OBJ) $(XPM_OBJ) $(CURL_OBJ) $(OUTDIR)\version.obj $(LINKARGS2)
 <<
 
 !ENDIF
@@ -1640,6 +1665,9 @@ $(OUTDIR)/if_cscope.obj: $(OUTDIR) if_cscope.c $(INCL)
 
 $(OUTDIR)/if_lua.obj: $(OUTDIR) if_lua.c $(INCL)
 	$(CC) $(CFLAGS_OUTDIR) $(LUA_INC) if_lua.c
+
+$(OUTDIR)/if_curl.obj: $(OUTDIR) if_curl.c $(INCL)
+	$(CC) $(CFLAGS_OUTDIR) $(CURL_INC) if_curl.c
 
 auto/if_perl.c: if_perl.xs typemap
 	$(XSUBPP) -prototypes -typemap $(XSUBPP_TYPEMAP) \
