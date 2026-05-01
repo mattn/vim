@@ -212,6 +212,13 @@ curl_header_cb(char *ptr, size_t size, size_t nmemb, void *userdata)
     curl_buffer_T   *buf = (curl_buffer_T *)userdata;
     size_t	    realsize = size * nmemb;
 
+    // libcurl invokes this callback once per header line, including the
+    // "HTTP/..." status line.  When following redirects, or on a 100-Continue
+    // followed by the real response, multiple responses are reported.  Reset
+    // the buffer so only the final response's headers are kept.
+    if (realsize >= 5 && STRNCMP(ptr, "HTTP/", 5) == 0 && buf->len > 0)
+	buf->len = 0;
+
     if (buf->len + realsize + 1 > buf->alloc)
     {
 	size_t	newalloc = (buf->len + realsize + 1) * 2;
@@ -277,7 +284,12 @@ curl_parse_headers(curl_buffer_T *hdrbuf)
 		value = vim_strnsave(vp, line_end - vp);
 		if (value != NULL)
 		{
-		    dict_add_string(dict, (char *)name, value);
+		    // Some headers (Set-Cookie, Vary, Link, ...) can appear
+		    // multiple times.  dict_add_string would fail with E685
+		    // on a duplicate key, so skip if already present (first
+		    // occurrence wins).
+		    if (dict_find(dict, name, -1) == NULL)
+			dict_add_string(dict, (char *)name, value);
 		    vim_free(value);
 		}
 		vim_free(name);
