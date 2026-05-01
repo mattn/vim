@@ -146,6 +146,11 @@ static char *(features[]) =
 	"-channel",
 #endif
 	"+cindent",
+#ifdef FEAT_CURL
+	"+curl",
+#else
+	"-curl",
+#endif
 #ifdef FEAT_CLIENTSERVER
 	"+clientserver",
 #else

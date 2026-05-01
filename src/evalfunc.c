@@ -1939,6 +1939,11 @@ typedef struct
 #else
 # define TABPANEL_FUNC(name) NULL
 #endif
+#ifdef FEAT_CURL
+# define CURL_FUNC(name) name
+#else
+# define CURL_FUNC(name) NULL
+#endif
 
 static const funcentry_T global_functions[] =
 {
@@ -2150,6 +2155,8 @@ static const funcentry_T global_functions[] =
 			ret_number,	    f_count},
     {"cscope_connection",0,3, 0,	    arg3_number_string_string,
 			ret_number,	    f_cscope_connection},
+    {"curl_request",	1, 2, FEARG_1,	    arg2_string_dict,
+			ret_dict_any,	    CURL_FUNC(f_curl_request)},
     {"cursor",		1, 3, FEARG_1,	    arg13_cursor,
 			ret_number,	    f_cursor},
     {"debugbreak",	1, 1, FEARG_1,	    arg1_number,
@@ -6914,6 +6921,13 @@ f_has(typval_T *argvars, typval_T *rettv)
 		},
 	{"channel",
 #ifdef FEAT_JOB_CHANNEL
+		1
+#else
+		0
+#endif
+		},
+	{"curl",
+#ifdef FEAT_CURL
 		1
 #else
 		0

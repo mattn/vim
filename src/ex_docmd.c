@@ -8344,6 +8344,10 @@ do_sleep(long msec, int hide_cursor)
 	if (has_any_channel() && wait_now > 20L)
 	    wait_now = 20L;
 #endif
+#ifdef FEAT_CURL
+	if (curl_async_active() && wait_now > 20L)
+	    wait_now = 20L;
+#endif
 #ifdef FEAT_SOUND
 	if (has_any_sound_callback() && wait_now > 20L)
 	    wait_now = 20L;
@@ -8361,6 +8365,11 @@ do_sleep(long msec, int hide_cursor)
 	// received in the call to ui_breakcheck() when the GUI is in use. This
 	// may occur when running a test case.
 	parse_queued_messages();
+#endif
+#ifdef FEAT_CURL
+	// Drive async HTTP requests during sleep.
+	if (curl_async_active())
+	    curl_check_all();
 #endif
 
 #ifdef ELAPSED_FUNC

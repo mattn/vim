@@ -365,6 +365,13 @@
 #endif
 
 /*
+ * libcurl - add HTTP client support
+ */
+#if defined(HAVE_CURL)
+# define FEAT_CURL
+#endif
+
+/*
  * libsodium - add advanced cryptography support
  */
 #if defined(HAVE_SODIUM) && defined(FEAT_CRYPT)

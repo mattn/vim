@@ -1514,6 +1514,7 @@ BASIC_SRC = \
 	help.c \
 	highlight.c \
 	if_cscope.c \
+	if_curl.c \
 	if_xcmdsrv.c \
 	indent.c \
 	insexpand.c \
@@ -1696,6 +1697,7 @@ OBJ_COMMON = \
 	objects/help.o \
 	objects/highlight.o \
 	objects/if_cscope.o \
+	objects/if_curl.o \
 	objects/if_xcmdsrv.o \
 	objects/indent.o \
 	objects/insexpand.o \
@@ -3386,6 +3388,9 @@ objects/highlight.o: highlight.c
 
 objects/if_cscope.o: if_cscope.c
 	$(CCC) -o $@ if_cscope.c
+
+objects/if_curl.o: if_curl.c
+	$(CCC) -o $@ if_curl.c
 
 objects/if_xcmdsrv.o: if_xcmdsrv.c
 	$(CCC) -o $@ if_xcmdsrv.c

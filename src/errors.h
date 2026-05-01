@@ -3811,3 +3811,7 @@ EXTERN char e_cannot_create_pipes[]
 #endif
 EXTERN char e_tag_file_entry_must_not_be_url[]
 	INIT(= N_("E1576: Tag file entry must not be a URL"));
+#ifdef FEAT_CURL
+EXTERN char e_curl_request_failed_str[]
+	INIT(= N_("E1577: curl request failed: %s"));
+#endif

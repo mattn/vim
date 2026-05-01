@@ -874,6 +874,7 @@ with_motif_lib
 with_tlib
 enable_largefile
 enable_canberra
+enable_libcurl
 enable_libsodium
 enable_acl
 enable_gpm
@@ -1548,6 +1549,7 @@ Optional Features:
   --disable-desktop-database-update  update disabled
   --disable-largefile     omit support for large files
   --disable-canberra      Do not use libcanberra.
+  --disable-libcurl        Do not use libcurl.
   --disable-libsodium      Do not use libsodium.
   --disable-acl           No check for ACL support.
   --enable-gpm=OPTS       Use gpm (Linux mouse daemon). default=yes OPTS=yes/no/dynamic
@@ -14726,6 +14728,79 @@ printf "%s\n" "yes" >&6; }; printf "%s\n" "#define HAVE_CANBERRA 1" >>confdefs.h
 else case e in #(
   e) { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no; try installing libcanberra-dev" >&5
 printf "%s\n" "no; try installing libcanberra-dev" >&6; }; CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS" ;;
+esac
+fi
+rm -f core conftest.err conftest.$ac_objext conftest.beam \
+    conftest$ac_exeext conftest.$ac_ext
+fi
+
+{ printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking --enable-libcurl argument" >&5
+printf %s "checking --enable-libcurl argument... " >&6; }
+# Check whether --enable-libcurl was given.
+if test ${enable_libcurl+y}
+then :
+  enableval=$enable_libcurl;
+else case e in #(
+  e) enable_libcurl="maybe" ;;
+esac
+fi
+
+
+if test "$enable_libcurl" = "maybe"; then
+  if test "$features" = "huge"; then
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: Defaulting to yes" >&5
+printf "%s\n" "Defaulting to yes" >&6; }
+    enable_libcurl="yes"
+  else
+    { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: Defaulting to no" >&5
+printf "%s\n" "Defaulting to no" >&6; }
+    enable_libcurl="no"
+  fi
+else
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: $enable_libcurl" >&5
+printf "%s\n" "$enable_libcurl" >&6; }
+fi
+if test "$enable_libcurl" = "yes"; then
+  if test "x$PKG_CONFIG" != "xno"; then
+    libcurl_lib=`$PKG_CONFIG --libs libcurl 2>/dev/null`
+    libcurl_cppflags=`$PKG_CONFIG --cflags-only-I libcurl 2>/dev/null`
+    libcurl_cflags=`$PKG_CONFIG --cflags-only-other libcurl 2>/dev/null`
+  fi
+  if test "x$libcurl_lib" = "x"; then
+    libcurl_lib=-lcurl
+    libcurl_cppflags=
+    libcurl_cflags=
+  fi
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: checking for libcurl" >&5
+printf %s "checking for libcurl... " >&6; }
+  ac_save_CPPFLAGS="$CPPFLAGS"
+  ac_save_CFLAGS="$CFLAGS"
+  ac_save_LIBS="$LIBS"
+  CPPFLAGS="$CPPFLAGS $libcurl_cppflags"
+  CFLAGS="$CFLAGS $libcurl_cflags"
+  LIBS="$LIBS $libcurl_lib"
+  cat confdefs.h - <<_ACEOF >conftest.$ac_ext
+/* end confdefs.h.  */
+
+  # include <curl/curl.h>
+
+int
+main (void)
+{
+
+     curl_global_init(CURL_GLOBAL_DEFAULT);
+  ;
+  return 0;
+}
+_ACEOF
+if ac_fn_c_try_link "$LINENO"
+then :
+  { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: yes" >&5
+printf "%s\n" "yes" >&6; }; printf "%s\n" "#define HAVE_CURL 1" >>confdefs.h
+
+else case e in #(
+  e) { printf "%s\n" "$as_me:${as_lineno-$LINENO}: result: no; try installing libcurl-dev" >&5
+printf "%s\n" "no; try installing libcurl-dev" >&6; }; CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS"; CPPFLAGS="$ac_save_CPPFLAGS" ;;
 esac
 fi
 rm -f core conftest.err conftest.$ac_objext conftest.beam \

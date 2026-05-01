@@ -3907,6 +3907,48 @@ if test "$enable_canberra" = "yes"; then
        AC_MSG_RESULT(no; try installing libcanberra-dev); CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS", CPPFLAGS="ac_save_CPPFLAGS")
 fi
 
+AC_MSG_CHECKING(--enable-libcurl argument)
+AC_ARG_ENABLE(libcurl,
+	[  --disable-libcurl        Do not use libcurl.],
+	, [enable_libcurl="maybe"])
+
+if test "$enable_libcurl" = "maybe"; then
+  if test "$features" = "huge"; then
+    AC_MSG_RESULT(Defaulting to yes)
+    enable_libcurl="yes"
+  else
+    AC_MSG_RESULT(Defaulting to no)
+    enable_libcurl="no"
+  fi
+else
+  AC_MSG_RESULT($enable_libcurl)
+fi
+if test "$enable_libcurl" = "yes"; then
+  if test "x$PKG_CONFIG" != "xno"; then
+    libcurl_lib=`$PKG_CONFIG --libs libcurl 2>/dev/null`
+    libcurl_cppflags=`$PKG_CONFIG --cflags-only-I libcurl 2>/dev/null`
+    libcurl_cflags=`$PKG_CONFIG --cflags-only-other libcurl 2>/dev/null`
+  fi
+  if test "x$libcurl_lib" = "x"; then
+    libcurl_lib=-lcurl
+    libcurl_cppflags=
+    libcurl_cflags=
+  fi
+  AC_MSG_CHECKING(for libcurl)
+  ac_save_CPPFLAGS="$CPPFLAGS"
+  ac_save_CFLAGS="$CFLAGS"
+  ac_save_LIBS="$LIBS"
+  CPPFLAGS="$CPPFLAGS $libcurl_cppflags"
+  CFLAGS="$CFLAGS $libcurl_cflags"
+  LIBS="$LIBS $libcurl_lib"
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([
+  # include <curl/curl.h>
+      ], [
+     curl_global_init(CURL_GLOBAL_DEFAULT); ])],
+       AC_MSG_RESULT(yes); AC_DEFINE(HAVE_CURL),
+       AC_MSG_RESULT(no; try installing libcurl-dev); CFLAGS="$ac_save_CFLAGS"; LIBS="$ac_save_LIBS"; CPPFLAGS="$ac_save_CPPFLAGS")
+fi
+
 AC_MSG_CHECKING(--enable-libsodium argument)
 AC_ARG_ENABLE(libsodium,
 	[  --disable-libsodium      Do not use libsodium.],

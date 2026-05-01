@@ -1847,6 +1847,9 @@ getout(int exitval)
 #ifdef FEAT_CSCOPE
     cs_end();
 #endif
+#ifdef FEAT_CURL
+    curl_lib_cleanup();
+#endif
 #ifdef FEAT_EVAL
     if (garbage_collect_at_exit)
 	garbage_collect(FALSE);
