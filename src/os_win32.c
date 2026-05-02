@@ -2015,11 +2015,18 @@ mch_set_cursor_shape(int thickness)
     {
 	if (*T_CSI == NUL)
 	{
-	    // If 't_SI' is not set, use the default cursor styles.
-	    if (thickness < 50)
-		vtp_printf("\033[3 q");	// underline
-	    else
-		vtp_printf("\033[0 q");	// default
+	    // If 't_SI' is not set, use the default cursor styles.  Cache
+	    // the last DECSCUSR parameter and skip emitting it again when
+	    // the shape has not changed: re-emitting it can cause some
+	    // terminals to briefly redisplay the cursor.
+	    static int last_shape = -1;
+	    int shape = (thickness < 50) ? 3 : 0;
+
+	    if (shape != last_shape)
+	    {
+		vtp_printf("\033[%d q", shape);
+		last_shape = shape;
+	    }
 	}
     }
     else
@@ -7104,9 +7111,19 @@ cursor_visible(BOOL fVisible)
     s_cursor_visible = fVisible;
 
     if (vtp_working)
+    {
+	// In vtp mode, visibility is controlled solely by DECTCEM.  Skip
+	// mch_update_cursor() since shape is independent of visibility and
+	// re-emitting DECSCUSR can cause the terminal to briefly redisplay
+	// the cursor while a redraw is in progress.
 	vtp_printf("\033[?25%c", fVisible ? 'h' : 'l');
+	return;
+    }
 
 # ifdef MCH_CURSOR_SHAPE
+    // Non-vtp Windows console: SetConsoleCursorInfo() consults
+    // s_cursor_visible inside mch_set_cursor_shape(), so the call is needed
+    // to apply the new visibility.
     mch_update_cursor();
 # endif
 }
