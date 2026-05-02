@@ -2015,11 +2015,18 @@ mch_set_cursor_shape(int thickness)
     {
 	if (*T_CSI == NUL)
 	{
-	    // If 't_SI' is not set, use the default cursor styles.
-	    if (thickness < 50)
-		vtp_printf("\033[3 q");	// underline
-	    else
-		vtp_printf("\033[0 q");	// default
+	    // If 't_SI' is not set, use the default cursor styles.  Cache
+	    // the last DECSCUSR parameter and skip emitting it again when
+	    // the shape has not changed: re-emitting it can cause some
+	    // terminals to briefly redisplay the cursor.
+	    static int last_shape = -1;
+	    int shape = (thickness < 50) ? 3 : 0;
+
+	    if (shape != last_shape)
+	    {
+		vtp_printf("\033[%d q", shape);
+		last_shape = shape;
+	    }
 	}
     }
     else
