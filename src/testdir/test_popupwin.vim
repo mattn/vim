@@ -5192,4 +5192,44 @@ func Test_popupwin_close_status_redraw()
   call StopVimInTerminal(buf)
 endfunc
 
+func Test_popupwin_close_copen_redraw()
+  CheckFeature quickfix
+
+  let lines =<< trim END
+    call setline(1, range(1, 30))
+    call setqflist(map(range(1, 20), {_, v -> {'bufnr': bufnr('%'), 'lnum': v, 'col': 1, 'text': 'item ' .. v}}))
+    function OpenPopup()
+      call popup_create(repeat(['ZZZZZZZZZ'], 10), {
+          \ 'pos': 'botright',
+          \ 'col': &columns,
+          \ 'line': &lines,
+          \ 'filter': function('PopupFilter'),
+          \ })
+    endfunction
+    function PopupFilter(winid, key)
+      if a:key ==# 'q'
+        call popup_close(a:winid)
+        copen
+        return 1
+      endif
+      return 1
+    endfunction
+    call OpenPopup()
+  END
+
+  call writefile(lines, 'XtestPopupCloseCopen', 'D')
+  let buf = RunVimInTerminal('-S XtestPopupCloseCopen', #{rows: 20})
+
+  call term_sendkeys(buf, 'q')
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, ":call OpenPopup()\<CR>")
+  call TermWait(buf, 50)
+  call term_sendkeys(buf, 'q')
+
+  call WaitForAssert({-> assert_notmatch('Z',
+        \ join(map(range(18, 20), {_, row -> term_getline(buf, row)}), "\n"))})
+
+  call StopVimInTerminal(buf)
+endfunc
+
 " vim: shiftwidth=2 sts=2

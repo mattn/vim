@@ -3289,10 +3289,22 @@ f_popup_setbuf(typval_T *argvars, typval_T *rettv UNUSED)
     static void
 popup_free(win_T *wp)
 {
+    int		old_winrow = wp->w_winrow;
+    int		old_wincol = wp->w_wincol;
+    int		old_popup_height = popup_height(wp);
+    int		old_popup_width = popup_width(wp);
+    int		old_popup_leftoff = wp->w_popup_leftoff;
+    int		was_hidden = (wp->w_popup_flags & POPF_HIDDEN) != 0;
+
     sign_undefine_by_name(popup_get_sign_name(wp), FALSE);
     wp->w_buffer->b_locked = FALSE;
     if (wp->w_winrow + popup_height(wp) >= cmdline_row)
 	clear_cmdline = TRUE;
+
+    if (!was_hidden)
+	redraw_under_popup_area(old_winrow, old_wincol,
+		old_popup_height, old_popup_width, old_popup_leftoff);
+
     win_free_popup(wp);
 
 #ifdef HAS_MESSAGE_WINDOW
