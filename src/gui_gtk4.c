@@ -269,9 +269,6 @@ modifiers_gdk2vim(guint state)
 }
 
 static GtkWidget *vbox;		// the main vertical box
-#ifdef FEAT_XIM
-static GtkEventController *key_ctrl_for_im = NULL;
-#endif
 
 // Forward declarations for event callbacks
 static void draw_event(GtkDrawingArea *area, cairo_t *cr, int width, int height, gpointer data);
@@ -536,7 +533,10 @@ gui_mch_init(void)
 			 G_CALLBACK(key_release_event), NULL);
 	gtk_widget_add_controller(gui.drawarea, key_ctrl);
 #ifdef FEAT_XIM
-	key_ctrl_for_im = key_ctrl;
+	xim_init();
+	if (xic != NULL)
+	    gtk_event_controller_key_set_im_context(
+		    GTK_EVENT_CONTROLLER_KEY(key_ctrl), xic);
 #endif
     }
 
@@ -1830,17 +1830,6 @@ drawarea_realize_cb(GtkWidget *widget UNUSED, gpointer data UNUSED)
     gui.surface = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
 
     gui_mch_new_colors();
-
-#ifdef FEAT_XIM
-    xim_init();
-    // Bind the IM context to the key event controller. GTK4 then routes
-    // key events through the input method automatically (preedit/commit
-    // signals fire, and key-pressed is suppressed when the IM consumes
-    // the key). This replaces GTK3's manual gtk_im_context_filter_keypress.
-    if (key_ctrl_for_im != NULL && xic != NULL)
-	gtk_event_controller_key_set_im_context(
-		GTK_EVENT_CONTROLLER_KEY(key_ctrl_for_im), xic);
-#endif
 }
 
     static void
